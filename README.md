@@ -1,38 +1,170 @@
-### 3 分钟了解如何进入开发
+# 🤖 Claude Agent Team Monitor
 
-欢迎使用云效代码管理 Codeup，通过阅读以下内容，你可以快速熟悉 Codeup ，并立即开始今天的工作。
+A real-time monitoring tool for Claude Code agent teams. Track all your agent teams, their members, tasks, and activity status in a beautiful terminal interface.
 
-### 提交**文件**
+## ✨ Features
 
-Codeup 支持两种方式进行代码提交：网页端提交，以及本地 Git 客户端提交。
+- 🔍 **Process Monitoring**: Automatically detects running Claude Code processes
+- 👥 **Team Tracking**: Monitors all active agent teams from `~/.claude/teams/`
+- 📋 **Task Management**: Displays task status and ownership for each team
+- 🎨 **Beautiful TUI**: Clean, colorful terminal interface built with Bubble Tea
+- ⚡ **Real-time Updates**: File system watching + periodic polling for instant updates
+- 🖥️ **Cross-platform**: Works on macOS and Linux
 
-* 如需体验本地命令行操作，请先安装 Git 工具，安装方法参见[安装Git](https://help.aliyun.com/document_detail/153800.html)。
+## 🏗️ Architecture
 
-* 如需体验 SSH 方式克隆和提交代码，请先在平台账号内配置 SSH 公钥，配置方法参见[配置 SSH 密钥](https://help.aliyun.com/document_detail/153709.html)。
+```
+agent-team-monitor/
+├── cmd/monitor/          # Main application entry point
+├── pkg/
+│   ├── monitor/          # Core monitoring logic
+│   │   ├── process.go    # Claude process detection
+│   │   ├── filesystem.go # File system watching
+│   │   ├── collector.go  # Data aggregation
+│   │   └── types.go      # Data structures
+│   ├── parser/           # Configuration parsers
+│   │   ├── team.go       # Team config parser
+│   │   └── task.go       # Task file parser
+│   └── ui/               # Terminal UI
+│       └── tui.go        # Bubble Tea interface
+```
 
-* 如需体验 HTTP 方式克隆和提交代码，请先在平台账号内配置克隆账密，配置方法参见[配置 HTTPS 克隆账号密码](https://help.aliyun.com/document_detail/153710.html)。
+## 🚀 Quick Start
 
-现在，你可以在 Codeup 中提交代码文件了，跟着文档「[__提交第一行代码__](https://help.aliyun.com/document_detail/153707.html?spm=a2c4g.153710.0.0.3c213774PFSMIV#6a5dbb1063ai5)」一起操作试试看吧。
+### Prerequisites
 
-<img src="https://img.alicdn.com/imgextra/i3/O1CN013zHrNR1oXgGu8ccvY_!!6000000005235-0-tps-2866-1268.jpg" width="100%" />
+- Go 1.21 or higher
+- Claude Code installed and configured
 
+### Installation
 
-### 进行代码检测
+```bash
+# Clone the repository
+git clone <your-repo-url>
+cd agent-team-monitor
 
-开发过程中，为了更好的维护你的代码质量，你可以开启 Codeup 内置开箱即用的「[代码检测服务](https://help.aliyun.com/document_detail/434321.html)」，开启后提交或合并请求的变更将自动触发检测，识别代码编写规范和安全漏洞问题，并及时提供结果报表和修复建议。
+# Install dependencies
+make install
 
-<img src="https://img.alicdn.com/imgextra/i2/O1CN01BRzI1I1IO0CR2i4Aw_!!6000000000882-0-tps-2862-1362.jpg" width="100%" />
+# Build the application
+make build
 
-### 开展代码评审
+# Run the monitor
+make run
+```
 
-功能开发完毕后，通常你需要发起「[代码评审并执行合并](https://help.aliyun.com/document_detail/153872.html)」，Codeup 支持多人协作的代码评审服务，你可以通过「[保护分支设置合并规则](https://help.aliyun.com/document_detail/153873.html?spm=a2c4g.203108.0.0.430765d1l9tTRR#p-4on-aep-l5q)」策略及「[__合并请求设置__](https://help.aliyun.com/document_detail/153874.html?spm=a2c4g.153871.0.0.3d38686cJpcdJI)」对合并过程进行流程化管控，同时提供在线代码评审及冲突解决能力，让评审过程更加流畅。
+### Usage
 
-<img src="https://img.alicdn.com/imgextra/i1/O1CN01MaBDFH1WWcGnQqMHy_!!6000000002796-0-tps-2592-1336.jpg" width="100%" />
+```bash
+# Run directly
+./bin/agent-team-monitor
 
-### 成员协作
+# Or use make
+make run
 
-是时候邀请成员一起编写卓越的代码工程了，请点击左下角「成员」邀请你的小伙伴开始协作吧！
+# Install globally (optional)
+make install-global
+agent-team-monitor
+```
 
-### 更多
+## 🎮 Controls
 
-Git 使用教学、高级功能指引等更多说明，参见[Codeup帮助文档](https://help.aliyun.com/document_detail/153402.html)。
+- `r` - Manual refresh
+- `q` or `Ctrl+C` - Quit
+
+## 📊 What It Monitors
+
+### Process Information
+- Running Claude Code processes (PID, uptime)
+- Process command line
+
+### Team Information
+- Team name and creation time
+- Team members (agents)
+- Agent status: WORKING, IDLE, COMPLETED
+- Current task assignment
+
+### Task Information
+- Task ID and subject
+- Task status: PENDING, IN PROGRESS, COMPLETED
+- Task owner (agent name)
+
+## 🛠️ Technical Stack
+
+- **Language**: Go 1.25
+- **TUI Framework**: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss)
+- **Process Monitoring**: [gopsutil](https://github.com/shirou/gopsutil)
+- **File System Watching**: [fsnotify](https://github.com/fsnotify/fsnotify)
+
+## 🔧 Configuration
+
+The monitor automatically watches:
+- `~/.claude/teams/` - Team configuration files
+- `~/.claude/tasks/` - Task status files
+
+No additional configuration required!
+
+## 📦 Building for Multiple Platforms
+
+```bash
+# Build for all supported platforms
+make build-all
+
+# Output:
+# bin/agent-team-monitor-darwin-amd64  (macOS Intel)
+# bin/agent-team-monitor-darwin-arm64  (macOS Apple Silicon)
+# bin/agent-team-monitor-linux-amd64   (Linux x86_64)
+# bin/agent-team-monitor-linux-arm64   (Linux ARM64)
+```
+
+## 🧪 Testing
+
+```bash
+make test
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📝 License
+
+MIT License
+
+## 🙏 Acknowledgments
+
+- Built for monitoring [Claude Code](https://github.com/anthropics/claude-code) agent teams
+- UI powered by [Charm](https://charm.sh/) libraries
+
+## 📸 Screenshots
+
+The monitor displays:
+- Real-time process information
+- Team hierarchy with agent status
+- Task lists with ownership and status
+- Color-coded status indicators
+- Auto-refreshing display
+
+## 🐛 Troubleshooting
+
+### No teams detected
+- Ensure Claude Code has created teams in `~/.claude/teams/`
+- Check that team config files exist and are valid JSON
+
+### No processes detected
+- Make sure Claude Code is running
+- The monitor looks for processes containing "claude" or "claude-code"
+
+### Permission errors
+- Ensure you have read access to `~/.claude/` directory
+- On Linux, you may need to adjust file permissions
+
+## 🔮 Future Enhancements
+
+- [ ] Web dashboard interface
+- [ ] Historical data tracking
+- [ ] Performance metrics
+- [ ] Alert notifications
+- [ ] Export to JSON/CSV
+- [ ] Agent communication logs
+- [ ] Resource usage monitoring
