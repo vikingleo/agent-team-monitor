@@ -56,8 +56,8 @@ function updateUI(data) {
 // Update last update time
 function updateLastUpdateTime(timestamp) {
     const date = new Date(timestamp);
-    const timeString = date.toLocaleTimeString();
-    document.getElementById('last-update').textContent = `Last updated: ${timeString}`;
+    const timeString = date.toLocaleTimeString('zh-CN');
+    document.getElementById('last-update').textContent = `最后更新: ${timeString}`;
 }
 
 // Update connection status
@@ -66,10 +66,10 @@ function updateConnectionStatus(connected) {
     if (connected !== isConnected) {
         isConnected = connected;
         if (connected) {
-            statusEl.textContent = '● Connected';
+            statusEl.textContent = '● 已连接';
             statusEl.className = 'status-indicator connected';
         } else {
-            statusEl.textContent = '● Disconnected';
+            statusEl.textContent = '● 已断开';
             statusEl.className = 'status-indicator disconnected';
         }
     }
@@ -80,7 +80,7 @@ function updateProcesses(processes) {
     const container = document.getElementById('processes-container');
 
     if (processes.length === 0) {
-        container.innerHTML = '<p class="empty-state">No Claude processes detected</p>';
+        container.innerHTML = '<p class="empty-state">未检测到 Claude 进程</p>';
         return;
     }
 
@@ -98,8 +98,8 @@ function renderProcess(process) {
     return `
         <div class="process-item">
             <div class="process-info">
-                <span class="process-pid">PID: ${process.pid}</span>
-                <span class="process-uptime">Uptime: ${uptime}</span>
+                <span class="process-pid">进程 ID: ${process.pid}</span>
+                <span class="process-uptime">运行时间: ${uptime}</span>
             </div>
         </div>
     `;
@@ -110,7 +110,7 @@ function updateTeams(teams) {
     const container = document.getElementById('teams-container');
 
     if (teams.length === 0) {
-        container.innerHTML = '<p class="empty-state">No active teams found</p>';
+        container.innerHTML = '<p class="empty-state">未找到活动团队</p>';
         return;
     }
 
@@ -124,22 +124,22 @@ function updateTeams(teams) {
 
 // Render a single team
 function renderTeam(team) {
-    const createdDate = new Date(team.created_at).toLocaleString();
+    const createdDate = new Date(team.created_at).toLocaleString('zh-CN');
 
     return `
         <div class="team-card">
             <div class="team-header">
                 <div class="team-name">${escapeHtml(team.name)}</div>
-                <div class="team-created">Created: ${createdDate}</div>
+                <div class="team-created">创建时间: ${createdDate}</div>
             </div>
 
             <div class="team-section">
-                <h3>Agents (${team.members?.length || 0})</h3>
+                <h3>成员 (${team.members?.length || 0})</h3>
                 ${renderAgents(team.members || [])}
             </div>
 
             <div class="team-section">
-                <h3>Tasks (${team.tasks?.length || 0})</h3>
+                <h3>任务 (${team.tasks?.length || 0})</h3>
                 ${renderTasks(team.tasks || [])}
             </div>
         </div>
@@ -149,7 +149,7 @@ function renderTeam(team) {
 // Render agents list
 function renderAgents(agents) {
     if (agents.length === 0) {
-        return '<p class="empty-state">No agents</p>';
+        return '<p class="empty-state">无成员</p>';
     }
 
     return `
@@ -162,7 +162,7 @@ function renderAgents(agents) {
 // Render a single agent
 function renderAgent(agent) {
     const statusClass = agent.status.toLowerCase();
-    const statusText = agent.status.toUpperCase();
+    const statusText = formatAgentStatus(agent.status);
 
     return `
         <div class="agent-item">
@@ -172,7 +172,7 @@ function renderAgent(agent) {
             </div>
             <div>
                 <span class="agent-status ${statusClass}">${statusText}</span>
-                ${agent.current_task ? `<div class="agent-task">Task: ${escapeHtml(agent.current_task)}</div>` : ''}
+                ${agent.current_task ? `<div class="agent-task">任务: ${escapeHtml(agent.current_task)}</div>` : ''}
             </div>
         </div>
     `;
@@ -181,7 +181,7 @@ function renderAgent(agent) {
 // Render tasks list
 function renderTasks(tasks) {
     if (tasks.length === 0) {
-        return '<p class="empty-state">No tasks</p>';
+        return '<p class="empty-state">无任务</p>';
     }
 
     return `
@@ -195,7 +195,7 @@ function renderTasks(tasks) {
 function renderTask(task) {
     const statusClass = task.status.toLowerCase();
     const statusText = formatTaskStatus(task.status);
-    const owner = task.owner || 'unassigned';
+    const owner = task.owner || '未分配';
 
     return `
         <div class="task-item">
@@ -204,7 +204,7 @@ function renderTask(task) {
                 <span class="task-status ${statusClass}">${statusText}</span>
             </div>
             <div class="task-subject">${escapeHtml(task.subject)}</div>
-            <div class="task-owner">Owner: ${escapeHtml(owner)}</div>
+            <div class="task-owner">负责人: ${escapeHtml(owner)}</div>
         </div>
     `;
 }
@@ -220,20 +220,30 @@ function formatUptime(startedAt) {
     const seconds = diff % 60;
 
     if (hours > 0) {
-        return `${hours}h ${minutes}m`;
+        return `${hours}小时 ${minutes}分钟`;
     } else if (minutes > 0) {
-        return `${minutes}m ${seconds}s`;
+        return `${minutes}分钟 ${seconds}秒`;
     } else {
-        return `${seconds}s`;
+        return `${seconds}秒`;
     }
+}
+
+// Format agent status
+function formatAgentStatus(status) {
+    const statusMap = {
+        'working': '工作中',
+        'idle': '空闲',
+        'completed': '已完成'
+    };
+    return statusMap[status] || status.toUpperCase();
 }
 
 // Format task status
 function formatTaskStatus(status) {
     const statusMap = {
-        'in_progress': 'IN PROGRESS',
-        'pending': 'PENDING',
-        'completed': 'COMPLETED'
+        'in_progress': '进行中',
+        'pending': '待处理',
+        'completed': '已完成'
     };
     return statusMap[status] || status.toUpperCase();
 }

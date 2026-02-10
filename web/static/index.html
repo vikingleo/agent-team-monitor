@@ -1,41 +1,41 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Agent Team Monitor</title>
+    <title>Claude Agent Team 监控器</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🤖 Claude Agent Team Monitor</h1>
+            <h1>🤖 Claude Agent Team 监控器</h1>
             <div class="header-info">
-                <span id="last-update">Last updated: --:--:--</span>
-                <span class="status-indicator" id="connection-status">● Connected</span>
+                <span id="last-update">最后更新: --:--:--</span>
+                <span class="status-indicator" id="connection-status">● 已连接</span>
             </div>
         </header>
 
         <main>
             <!-- Processes Section -->
             <section class="card">
-                <h2>📊 Claude Processes</h2>
+                <h2>📊 Claude 进程</h2>
                 <div id="processes-container">
-                    <p class="loading">Loading...</p>
+                    <p class="loading">加载中...</p>
                 </div>
             </section>
 
             <!-- Teams Section -->
             <section class="card">
-                <h2>👥 Active Teams</h2>
+                <h2>👥 活动团队</h2>
                 <div id="teams-container">
-                    <p class="loading">Loading...</p>
+                    <p class="loading">加载中...</p>
                 </div>
             </section>
         </main>
 
         <footer>
-            <p>Auto-refresh every second | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a></p>
+            <p>每秒自动刷新 | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a></p>
         </footer>
     </div>
 

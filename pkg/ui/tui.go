@@ -100,24 +100,24 @@ func (m model) View() string {
 	var b strings.Builder
 
 	// Title
-	title := titleStyle.Render("🤖 Claude Agent Team Monitor")
+	title := titleStyle.Render("🤖 Claude Agent Team 监控器")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
 	// Last updated
-	lastUpdate := fmt.Sprintf("Last updated: %s", m.state.UpdatedAt.Format("15:04:05"))
+	lastUpdate := fmt.Sprintf("最后更新: %s", m.state.UpdatedAt.Format("15:04:05"))
 	b.WriteString(lipgloss.NewStyle().Faint(true).Render(lastUpdate))
 	b.WriteString("\n\n")
 
 	// Processes section
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 Claude Processes"))
-	b.WriteString(fmt.Sprintf(" (%d running)\n", len(m.state.Processes)))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 Claude 进程"))
+	b.WriteString(fmt.Sprintf(" (运行中: %d)\n", len(m.state.Processes)))
 	if len(m.state.Processes) == 0 {
-		b.WriteString(processStyle.Render("  No Claude processes detected\n"))
+		b.WriteString(processStyle.Render("  未检测到 Claude 进程\n"))
 	} else {
 		for _, proc := range m.state.Processes {
 			uptime := time.Since(proc.StartedAt).Round(time.Second)
-			procInfo := fmt.Sprintf("  PID: %d | Uptime: %s", proc.PID, uptime)
+			procInfo := fmt.Sprintf("  进程 ID: %d | 运行时间: %s", proc.PID, uptime)
 			b.WriteString(processStyle.Render(procInfo))
 			b.WriteString("\n")
 		}
@@ -125,11 +125,11 @@ func (m model) View() string {
 	b.WriteString("\n")
 
 	// Teams section
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("👥 Active Teams"))
-	b.WriteString(fmt.Sprintf(" (%d teams)\n\n", len(m.state.Teams)))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("👥 活动团队"))
+	b.WriteString(fmt.Sprintf(" (共 %d 个)\n\n", len(m.state.Teams)))
 
 	if len(m.state.Teams) == 0 {
-		b.WriteString(teamStyle.Render("No active teams found"))
+		b.WriteString(teamStyle.Render("未找到活动团队"))
 	} else {
 		for _, team := range m.state.Teams {
 			teamContent := m.renderTeam(team)
@@ -140,7 +140,7 @@ func (m model) View() string {
 
 	// Help
 	b.WriteString("\n")
-	help := lipgloss.NewStyle().Faint(true).Render("Press 'r' to refresh | 'q' to quit")
+	help := lipgloss.NewStyle().Faint(true).Render("按 'r' 刷新 | 按 'q' 退出")
 	b.WriteString(help)
 
 	return b.String()
@@ -150,23 +150,23 @@ func (m model) renderTeam(team types.TeamInfo) string {
 	var b strings.Builder
 
 	// Team header
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("Team: %s", team.Name)))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("团队: %s", team.Name)))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("Created: %s", team.CreatedAt.Format("2006-01-02 15:04"))))
+	b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("创建时间: %s", team.CreatedAt.Format("2006-01-02 15:04"))))
 	b.WriteString("\n\n")
 
 	// Agents
-	b.WriteString(lipgloss.NewStyle().Underline(true).Render("Agents:"))
+	b.WriteString(lipgloss.NewStyle().Underline(true).Render("成员:"))
 	b.WriteString("\n")
 	if len(team.Members) == 0 {
-		b.WriteString(agentStyle.Render("  No agents"))
+		b.WriteString(agentStyle.Render("  无成员"))
 		b.WriteString("\n")
 	} else {
 		for _, agent := range team.Members {
 			statusStr := m.formatStatus(agent.Status)
 			agentInfo := fmt.Sprintf("  • %s [%s] - %s", agent.Name, agent.AgentType, statusStr)
 			if agent.CurrentTask != "" {
-				agentInfo += fmt.Sprintf(" (Task: %s)", agent.CurrentTask)
+				agentInfo += fmt.Sprintf(" (任务: %s)", agent.CurrentTask)
 			}
 			b.WriteString(agentStyle.Render(agentInfo))
 			b.WriteString("\n")
@@ -175,17 +175,17 @@ func (m model) renderTeam(team types.TeamInfo) string {
 	b.WriteString("\n")
 
 	// Tasks
-	b.WriteString(lipgloss.NewStyle().Underline(true).Render("Tasks:"))
+	b.WriteString(lipgloss.NewStyle().Underline(true).Render("任务:"))
 	b.WriteString("\n")
 	if len(team.Tasks) == 0 {
-		b.WriteString(taskStyle.Render("    No tasks"))
+		b.WriteString(taskStyle.Render("    无任务"))
 		b.WriteString("\n")
 	} else {
 		for _, task := range team.Tasks {
 			statusStr := m.formatTaskStatus(task.Status)
 			owner := task.Owner
 			if owner == "" {
-				owner = "unassigned"
+				owner = "未分配"
 			}
 			taskInfo := fmt.Sprintf("    [%s] %s - %s (%s)", task.ID, task.Subject, statusStr, owner)
 			b.WriteString(taskStyle.Render(taskInfo))
@@ -199,11 +199,11 @@ func (m model) renderTeam(team types.TeamInfo) string {
 func (m model) formatStatus(status string) string {
 	switch status {
 	case "working":
-		return statusWorkingStyle.Render("WORKING")
+		return statusWorkingStyle.Render("工作中")
 	case "idle":
-		return statusIdleStyle.Render("IDLE")
+		return statusIdleStyle.Render("空闲")
 	case "completed":
-		return statusCompletedStyle.Render("COMPLETED")
+		return statusCompletedStyle.Render("已完成")
 	default:
 		return status
 	}
@@ -212,11 +212,11 @@ func (m model) formatStatus(status string) string {
 func (m model) formatTaskStatus(status string) string {
 	switch status {
 	case "in_progress":
-		return statusWorkingStyle.Render("IN PROGRESS")
+		return statusWorkingStyle.Render("进行中")
 	case "pending":
-		return statusIdleStyle.Render("PENDING")
+		return statusIdleStyle.Render("待处理")
 	case "completed":
-		return statusCompletedStyle.Render("COMPLETED")
+		return statusCompletedStyle.Render("已完成")
 	default:
 		return status
 	}
