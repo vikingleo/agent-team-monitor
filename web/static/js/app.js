@@ -10,6 +10,7 @@ const API_ENDPOINTS = {
 // State
 let isConnected = true;
 let updateInterval = null;
+let previousState = null; // 存储上一次的状态用于对比
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -46,11 +47,20 @@ async function fetchData() {
     }
 }
 
-// Update UI with new data
+// Update UI with new data (智能更新，只更新变化的部分)
 function updateUI(data) {
     updateLastUpdateTime(data.updated_at);
-    updateProcesses(data.processes || []);
-    updateTeams(data.teams || []);
+
+    // 只在数据真正变化时才更新
+    if (!previousState || JSON.stringify(previousState.processes) !== JSON.stringify(data.processes)) {
+        updateProcesses(data.processes || []);
+    }
+
+    if (!previousState || JSON.stringify(previousState.teams) !== JSON.stringify(data.teams)) {
+        updateTeams(data.teams || []);
+    }
+
+    previousState = data;
 }
 
 // Update last update time
