@@ -309,6 +309,17 @@ main {
     margin-top: 3px;
 }
 
+.agent-cwd {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 300px;
+}
+
 /* Tasks - 紧凑型 */
 .task-list {
     display: grid;

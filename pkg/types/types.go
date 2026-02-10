@@ -19,6 +19,7 @@ type AgentInfo struct {
 	Status       string    `json:"status"` // idle, working, completed
 	CurrentTask  string    `json:"current_task,omitempty"`
 	LastActivity time.Time `json:"last_activity"`
+	Cwd          string    `json:"cwd,omitempty"` // Working directory
 }
 
 // TaskInfo represents a task in the task list

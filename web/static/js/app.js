@@ -220,6 +220,7 @@ function renderAgent(agent) {
             <div>
                 <span class="agent-status ${statusClass}">${statusText}</span>
                 ${agent.current_task ? `<div class="agent-task">任务: ${escapeHtml(agent.current_task)}</div>` : ''}
+                ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
             </div>
         </div>
     `;

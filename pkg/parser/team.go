@@ -21,8 +21,9 @@ type TeamConfig struct {
 // TeamMember represents a member in the team config
 type TeamMember struct {
 	Name      string `json:"name"`
-	AgentID   string `json:"agent_id"`
-	AgentType string `json:"agent_type"`
+	AgentID   string `json:"agentId"`
+	AgentType string `json:"agentType"`
+	Cwd       string `json:"cwd"`
 }
 
 // ParseTeamConfig parses a team config.json file
@@ -54,6 +55,7 @@ func ParseTeamConfig(configPath string) (*types.TeamInfo, error) {
 			AgentType:    member.AgentType,
 			Status:       "unknown",
 			LastActivity: time.Now(),
+			Cwd:          member.Cwd,
 		}
 	}
 

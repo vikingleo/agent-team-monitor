@@ -170,6 +170,12 @@ func (m model) renderTeam(team types.TeamInfo) string {
 			}
 			b.WriteString(agentStyle.Render(agentInfo))
 			b.WriteString("\n")
+			// 显示工作目录
+			if agent.Cwd != "" {
+				cwdInfo := fmt.Sprintf("    📁 %s", agent.Cwd)
+				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).MarginLeft(2).Render(cwdInfo))
+				b.WriteString("\n")
+			}
 		}
 	}
 	b.WriteString("\n")
