@@ -1,0 +1,348 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --primary-color: #7D56F4;
+    --secondary-color: #874BFD;
+    --success-color: #04B575;
+    --warning-color: #FFA500;
+    --danger-color: #FF6B6B;
+    --bg-color: #0f0f23;
+    --card-bg: #1a1a2e;
+    --text-color: #e0e0e0;
+    --text-muted: #888888;
+    --border-color: #2a2a3e;
+    --working-color: #00FF00;
+    --idle-color: #FFFF00;
+    --completed-color: #888888;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    padding: 30px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+}
+
+.header-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.status-indicator {
+    padding: 5px 15px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    font-weight: 500;
+}
+
+.status-indicator.connected {
+    color: var(--working-color);
+}
+
+.status-indicator.disconnected {
+    color: var(--danger-color);
+}
+
+main {
+    display: grid;
+    gap: 20px;
+}
+
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.card h2 {
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+    color: var(--primary-color);
+}
+
+.loading {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 20px;
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px;
+    font-style: italic;
+}
+
+/* Processes */
+.process-list {
+    display: grid;
+    gap: 15px;
+}
+
+.process-item {
+    background: rgba(255, 107, 107, 0.1);
+    border-left: 4px solid var(--danger-color);
+    padding: 15px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.process-info {
+    display: flex;
+    gap: 20px;
+}
+
+.process-pid {
+    font-weight: bold;
+    color: var(--danger-color);
+}
+
+.process-uptime {
+    color: var(--text-muted);
+}
+
+/* Teams */
+.teams-grid {
+    display: grid;
+    gap: 20px;
+}
+
+.team-card {
+    background: rgba(135, 75, 253, 0.05);
+    border: 2px solid var(--secondary-color);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.team-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.team-name {
+    font-size: 1.3rem;
+    font-weight: bold;
+    color: var(--secondary-color);
+    margin-bottom: 5px;
+}
+
+.team-created {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.team-section {
+    margin-bottom: 20px;
+}
+
+.team-section h3 {
+    font-size: 1.1rem;
+    margin-bottom: 12px;
+    color: var(--text-color);
+    text-decoration: underline;
+}
+
+/* Agents */
+.agent-list {
+    display: grid;
+    gap: 10px;
+}
+
+.agent-item {
+    background: rgba(4, 181, 117, 0.1);
+    border-left: 4px solid var(--success-color);
+    padding: 12px 15px;
+    border-radius: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.agent-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.agent-name {
+    font-weight: bold;
+    color: var(--success-color);
+}
+
+.agent-type {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.agent-status {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.agent-status.working {
+    background: rgba(0, 255, 0, 0.2);
+    color: var(--working-color);
+}
+
+.agent-status.idle {
+    background: rgba(255, 255, 0, 0.2);
+    color: var(--idle-color);
+}
+
+.agent-status.completed {
+    background: rgba(136, 136, 136, 0.2);
+    color: var(--completed-color);
+}
+
+.agent-task {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 5px;
+}
+
+/* Tasks */
+.task-list {
+    display: grid;
+    gap: 10px;
+}
+
+.task-item {
+    background: rgba(255, 165, 0, 0.1);
+    border-left: 4px solid var(--warning-color);
+    padding: 12px 15px;
+    border-radius: 6px;
+}
+
+.task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.task-id {
+    font-weight: bold;
+    color: var(--warning-color);
+    font-size: 0.9rem;
+}
+
+.task-status {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.task-status.in_progress {
+    background: rgba(0, 255, 0, 0.2);
+    color: var(--working-color);
+}
+
+.task-status.pending {
+    background: rgba(255, 255, 0, 0.2);
+    color: var(--idle-color);
+}
+
+.task-status.completed {
+    background: rgba(136, 136, 136, 0.2);
+    color: var(--completed-color);
+}
+
+.task-subject {
+    color: var(--text-color);
+    margin-bottom: 5px;
+}
+
+.task-owner {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    margin-top: 40px;
+    padding: 20px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+footer a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 1.8rem;
+    }
+
+    .header-info {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .process-item,
+    .agent-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.team-card,
+.process-item,
+.agent-item,
+.task-item {
+    animation: fadeIn 0.3s ease-out;
+}

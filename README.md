@@ -69,8 +69,43 @@ agent-team-monitor
 
 ## 🎮 Controls
 
+### TUI Mode
 - `r` - Manual refresh
 - `q` or `Ctrl+C` - Quit
+
+### Web Mode
+- Auto-refresh every second
+- View at `http://localhost:8080`
+- REST API available at `/api/*`
+
+## 🌐 Web Dashboard (NEW!)
+
+The web dashboard provides:
+- **Modern UI**: Beautiful, responsive web interface
+- **REST API**: Access monitoring data programmatically
+- **Multi-user**: Multiple people can view simultaneously
+- **Remote Access**: Access from any device on the network
+
+### API Endpoints
+
+```bash
+GET /api/state      # Complete monitoring state
+GET /api/teams      # Team information only
+GET /api/processes  # Process information only
+GET /api/health     # Server health check
+```
+
+### Example API Usage
+
+```bash
+# Get all data
+curl http://localhost:8080/api/state | jq
+
+# Get teams only
+curl http://localhost:8080/api/teams | jq
+```
+
+📖 **Full Web Guide**: See [WEB_GUIDE.md](WEB_GUIDE.md) for detailed documentation.
 
 ## 📊 What It Monitors
 
@@ -93,6 +128,7 @@ agent-team-monitor
 
 - **Language**: Go 1.25
 - **TUI Framework**: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss)
+- **Web Framework**: Native Go HTTP server
 - **Process Monitoring**: [gopsutil](https://github.com/shirou/gopsutil)
 - **File System Watching**: [fsnotify](https://github.com/fsnotify/fsnotify)
 
@@ -117,10 +153,20 @@ make build-all
 # bin/agent-team-monitor-linux-arm64   (Linux ARM64)
 ```
 
-## 🧪 Testing
+## 🧪 Development
 
 ```bash
+# Run in TUI mode (development)
+make dev-tui
+
+# Run in web mode (development)
+make dev-web
+
+# Run tests
 make test
+
+# Show all available commands
+make help
 ```
 
 ## 🤝 Contributing
@@ -161,7 +207,9 @@ The monitor displays:
 
 ## 🔮 Future Enhancements
 
-- [ ] Web dashboard interface
+- [x] Web dashboard interface
+- [x] REST API endpoints
+- [ ] WebSocket real-time updates
 - [ ] Historical data tracking
 - [ ] Performance metrics
 - [ ] Alert notifications
