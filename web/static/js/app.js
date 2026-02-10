@@ -248,7 +248,7 @@ function renderTask(task) {
     return `
         <div class="task-item">
             <div class="task-header">
-                <span class="task-id">[${escapeHtml(task.id)}]</span>
+                <span class="task-id">${escapeHtml(task.id)}</span>
                 <span class="task-status ${statusClass}">${statusText}</span>
             </div>
             <div class="task-subject">${escapeHtml(task.subject)}</div>

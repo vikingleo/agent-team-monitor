@@ -194,10 +194,10 @@ main {
     white-space: nowrap;
 }
 
-/* Teams - 紧凑型网格布局 */
+/* Teams - 紧凑型网格布局，增加最小宽度 */
 .teams-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
     gap: 15px;
 }
 
@@ -317,7 +317,7 @@ main {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 300px;
+    max-width: 100%;
 }
 
 /* Tasks - 紧凑型 */
@@ -424,6 +424,12 @@ footer a:hover {
         flex-direction: column;
         align-items: flex-start;
         gap: 5px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .teams-grid {
+        grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
     }
 }
 
