@@ -213,15 +213,13 @@ function renderAgent(agent) {
 
     return `
         <div class="agent-item">
-            <div class="agent-info">
+            <div class="agent-header">
                 <span class="agent-name">${escapeHtml(agent.name)}</span>
                 <span class="agent-type">[${escapeHtml(agent.agent_type)}]</span>
-            </div>
-            <div>
                 <span class="agent-status ${statusClass}">${statusText}</span>
-                ${agent.current_task ? `<div class="agent-task">任务: ${escapeHtml(agent.current_task)}</div>` : ''}
-                ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
             </div>
+            ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
+            ${agent.current_task ? `<div class="agent-task">任务: ${escapeHtml(agent.current_task)}</div>` : ''}
         </div>
     `;
 }

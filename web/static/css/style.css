@@ -252,32 +252,24 @@ main {
     border-left: 3px solid var(--success-color);
     padding: 6px 10px;
     border-radius: 4px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
     font-size: 0.85rem;
 }
 
-.agent-info {
+.agent-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex: 1;
-    min-width: 0;
+    flex-wrap: wrap;
 }
 
 .agent-name {
     font-weight: 600;
     color: var(--success-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .agent-type {
     color: var(--text-muted);
     font-size: 0.75rem;
-    white-space: nowrap;
 }
 
 .agent-status {
@@ -312,12 +304,11 @@ main {
 .agent-cwd {
     font-size: 0.7rem;
     color: var(--text-muted);
-    margin-top: 2px;
+    margin-top: 3px;
     font-family: 'Courier New', monospace;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 100%;
 }
 
 /* Tasks - 紧凑型 */
