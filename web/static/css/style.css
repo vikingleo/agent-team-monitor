@@ -72,8 +72,61 @@ header h1 {
 }
 
 main {
-    display: grid;
-    gap: 15px;
+    display: block;
+}
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 15px;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 10px 20px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tab-button:hover {
+    color: var(--text-color);
+    background: rgba(125, 86, 244, 0.1);
+}
+
+.tab-button.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+    font-weight: 600;
+}
+
+.badge {
+    background: var(--primary-color);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    min-width: 20px;
+    text-align: center;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
 }
 
 .card {
@@ -105,9 +158,10 @@ main {
     font-size: 0.9rem;
 }
 
-/* Processes - 紧凑型 */
+/* Processes - 紧凑型单行显示 */
 .process-list {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
 }
 
@@ -116,24 +170,28 @@ main {
     border-left: 3px solid var(--danger-color);
     padding: 8px 12px;
     border-radius: 4px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
     font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 15px;
 }
 
 .process-info {
     display: flex;
+    align-items: center;
     gap: 15px;
+    flex-wrap: wrap;
 }
 
 .process-pid {
     font-weight: bold;
     color: var(--danger-color);
+    white-space: nowrap;
 }
 
 .process-uptime {
     color: var(--text-muted);
+    white-space: nowrap;
 }
 
 /* Teams - 紧凑型网格布局 */

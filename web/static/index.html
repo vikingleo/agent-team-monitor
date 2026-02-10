@@ -17,21 +17,29 @@
         </header>
 
         <main>
-            <!-- Processes Section -->
-            <section class="card">
-                <h2>📊 Claude 进程</h2>
-                <div id="processes-container">
-                    <p class="loading">加载中...</p>
-                </div>
-            </section>
+            <!-- Tabs Navigation -->
+            <div class="tabs">
+                <button class="tab-button active" data-tab="teams">
+                    👥 活动团队 <span id="teams-count" class="badge">0</span>
+                </button>
+                <button class="tab-button" data-tab="processes">
+                    📊 进程 <span id="processes-count" class="badge">0</span>
+                </button>
+            </div>
 
-            <!-- Teams Section -->
-            <section class="card">
-                <h2>👥 活动团队</h2>
+            <!-- Teams Tab (Default) -->
+            <div id="teams-tab" class="tab-content active">
                 <div id="teams-container">
                     <p class="loading">加载中...</p>
                 </div>
-            </section>
+            </div>
+
+            <!-- Processes Tab (Hidden by default) -->
+            <div id="processes-tab" class="tab-content">
+                <div id="processes-container">
+                    <p class="loading">加载中...</p>
+                </div>
+            </div>
         </main>
 
         <footer>

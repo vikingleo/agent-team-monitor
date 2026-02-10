@@ -15,9 +15,37 @@ let previousState = null; // 存储上一次的状态用于对比
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Claude Agent Team Monitor initialized');
+    initTabs();
     startAutoRefresh();
     fetchData();
 });
+
+// Initialize tabs
+function initTabs() {
+    const tabButtons = document.querySelectorAll('.tab-button');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const tabName = button.getAttribute('data-tab');
+            switchTab(tabName);
+        });
+    });
+}
+
+// Switch tabs
+function switchTab(tabName) {
+    // Update buttons
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+    // Update content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+}
 
 // Auto-refresh
 function startAutoRefresh() {
@@ -51,6 +79,9 @@ async function fetchData() {
 function updateUI(data) {
     updateLastUpdateTime(data.updated_at);
 
+    // 更新计数徽章
+    updateBadges(data);
+
     // 只在数据真正变化时才更新
     if (!previousState || JSON.stringify(previousState.processes) !== JSON.stringify(data.processes)) {
         updateProcesses(data.processes || []);
@@ -61,6 +92,12 @@ function updateUI(data) {
     }
 
     previousState = data;
+}
+
+// Update count badges
+function updateBadges(data) {
+    document.getElementById('teams-count').textContent = (data.teams || []).length;
+    document.getElementById('processes-count').textContent = (data.processes || []).length;
 }
 
 // Update last update time
