@@ -155,45 +155,97 @@ func (m model) renderTeam(team types.TeamInfo) string {
 	b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("创建时间: %s", team.CreatedAt.Format("2006-01-02 15:04"))))
 	b.WriteString("\n\n")
 
-	// Agents
-	b.WriteString(lipgloss.NewStyle().Underline(true).Render("成员:"))
+	// Build task-by-owner map (same logic as web UI)
+	agentNames := make(map[string]bool)
+	for _, agent := range team.Members {
+		agentNames[agent.Name] = true
+	}
+	tasksByOwner := make(map[string][]types.TaskInfo)
+	var unassignedTasks []types.TaskInfo
+	for _, task := range team.Tasks {
+		owner := task.Owner
+		if owner == "" && task.Subject != "" && agentNames[task.Subject] {
+			owner = task.Subject
+		}
+		if owner != "" {
+			tasksByOwner[owner] = append(tasksByOwner[owner], task)
+		} else {
+			unassignedTasks = append(unassignedTasks, task)
+		}
+	}
+
+	// Section header
+	b.WriteString(lipgloss.NewStyle().Underline(true).Render(
+		fmt.Sprintf("成员与任务 (%d 成员, %d 任务)", len(team.Members), len(team.Tasks))))
 	b.WriteString("\n")
+
 	if len(team.Members) == 0 {
 		b.WriteString(agentStyle.Render("  无成员"))
 		b.WriteString("\n")
 	} else {
+		detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).MarginLeft(2)
+		thinkingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#DAA520")).MarginLeft(2)
+		toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).MarginLeft(2)
+		messageStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB")).MarginLeft(2)
+
 		for _, agent := range team.Members {
 			statusStr := m.formatStatus(agent.Status)
 			agentInfo := fmt.Sprintf("  • %s [%s] - %s", agent.Name, agent.AgentType, statusStr)
-			if agent.CurrentTask != "" {
-				agentInfo += fmt.Sprintf(" (任务: %s)", agent.CurrentTask)
+			// Only show current_task if it's not the agent's own name (same as web)
+			if agent.CurrentTask != "" && agent.CurrentTask != agent.Name {
+				agentInfo += fmt.Sprintf(" (当前: %s)", agent.CurrentTask)
 			}
 			b.WriteString(agentStyle.Render(agentInfo))
 			b.WriteString("\n")
-			// 显示工作目录
+
+			// Working directory
 			if agent.Cwd != "" {
-				cwdInfo := fmt.Sprintf("    📁 %s", agent.Cwd)
-				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).MarginLeft(2).Render(cwdInfo))
+				b.WriteString(detailStyle.Render(fmt.Sprintf("    📁 %s", agent.Cwd)))
 				b.WriteString("\n")
+			}
+
+			// Inbox message summary
+			if agent.MessageSummary != "" {
+				b.WriteString(messageStyle.Render(fmt.Sprintf("    📨 %s", agent.MessageSummary)))
+				b.WriteString("\n")
+			}
+
+			// Last thinking
+			if agent.LastThinking != "" {
+				b.WriteString(thinkingStyle.Render(fmt.Sprintf("    💭 %s", agent.LastThinking)))
+				b.WriteString("\n")
+			}
+
+			// Last tool use
+			if agent.LastToolUse != "" {
+				toolInfo := agent.LastToolUse
+				if agent.LastToolDetail != "" {
+					toolInfo += ": " + agent.LastToolDetail
+				}
+				b.WriteString(toolStyle.Render(fmt.Sprintf("    🔧 %s", toolInfo)))
+				b.WriteString("\n")
+			}
+
+			// Agent's tasks (grouped under agent, same as web)
+			if tasks, ok := tasksByOwner[agent.Name]; ok && len(tasks) > 0 {
+				for _, task := range tasks {
+					statusStr := m.formatTaskStatus(task.Status)
+					taskInfo := fmt.Sprintf("      %s %s %s", task.ID, statusStr, task.Subject)
+					b.WriteString(taskStyle.Render(taskInfo))
+					b.WriteString("\n")
+				}
 			}
 		}
 	}
-	b.WriteString("\n")
 
-	// Tasks
-	b.WriteString(lipgloss.NewStyle().Underline(true).Render("任务:"))
-	b.WriteString("\n")
-	if len(team.Tasks) == 0 {
-		b.WriteString(taskStyle.Render("    无任务"))
+	// Unassigned tasks
+	if len(unassignedTasks) > 0 {
 		b.WriteString("\n")
-	} else {
-		for _, task := range team.Tasks {
+		b.WriteString(agentStyle.Render(fmt.Sprintf("  • 未分配任务 [%d]", len(unassignedTasks))))
+		b.WriteString("\n")
+		for _, task := range unassignedTasks {
 			statusStr := m.formatTaskStatus(task.Status)
-			owner := task.Owner
-			if owner == "" {
-				owner = "未分配"
-			}
-			taskInfo := fmt.Sprintf("    [%s] %s - %s (%s)", task.ID, task.Subject, statusStr, owner)
+			taskInfo := fmt.Sprintf("      %s %s %s", task.ID, statusStr, task.Subject)
 			b.WriteString(taskStyle.Render(taskInfo))
 			b.WriteString("\n")
 		}
