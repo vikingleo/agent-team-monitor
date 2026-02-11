@@ -1,15 +1,5 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(go mod tidy:*)",
-      "Bash(go env:*)",
-      "Bash(make build:*)",
-      "Bash(chmod:*)",
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: implement Claude agent team monitor\n\nAdd a real-time monitoring tool for Claude Code agent teams with the following features:\n\nCore Features:\n- Process monitoring: Detect running Claude Code processes using gopsutil\n- Team tracking: Monitor all active teams from ~/.claude/teams/\n- Task management: Display task status and ownership for each team\n- Real-time updates: File system watching \\(fsnotify\\) + periodic polling\n- Beautiful TUI: Colorful terminal interface built with Bubble Tea\n- Cross-platform: Works on macOS and Linux\n\nTechnical Stack:\n- Language: Go 1.25\n- TUI Framework: Bubble Tea + Lipgloss\n- Process Monitoring: gopsutil v3.24.5\n- File System Watching: fsnotify v1.8.0\n\nProject Structure:\n- cmd/monitor/: Main application entry point\n- pkg/monitor/: Core monitoring logic \\(process, filesystem, collector\\)\n- pkg/parser/: Configuration parsers \\(team, task\\)\n- pkg/types/: Shared data types\n- pkg/ui/: Terminal UI implementation\n\nAdditional Files:\n- Makefile: Build scripts for development and multi-platform builds\n- test-setup.sh: Script to create test data for demonstration\n- README.md: English documentation\n- README.zh-CN.md: Chinese documentation\n- PROJECT_SUMMARY.md: Detailed project summary and technical notes\n\nThe monitor uses a hybrid approach:\n1. File system monitoring for instant updates on config changes\n2. Periodic polling \\(5s\\) to ensure no changes are missed\n3. Smart debouncing \\(100ms\\) to avoid excessive updates\n\nAgent status is inferred from task ownership:\n- WORKING: Agent has tasks with status \"in_progress\"\n- IDLE: Agent has no active tasks\n- COMPLETED: Agent''s tasks are completed\nEOF\n\\)\")",
-      "Bash(cat:*)",
-      "Bash(./bin/agent-team-monitor:*)",
-      "Bash(git commit:*)"
-    ]
-  }
+	"permissions": {
+		"allow": ["Bash(*)"]
+	}
 }
