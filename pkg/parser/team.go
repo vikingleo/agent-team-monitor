@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/liaoweijun/agent-team-monitor/pkg/types"
@@ -24,6 +25,7 @@ type TeamMember struct {
 	AgentID   string `json:"agentId"`
 	AgentType string `json:"agentType"`
 	Cwd       string `json:"cwd"`
+	Prompt    string `json:"prompt"`
 }
 
 // ParseTeamConfig parses a team config.json file
@@ -49,13 +51,20 @@ func ParseTeamConfig(configPath string) (*types.TeamInfo, error) {
 	// Convert members
 	agents := make([]types.AgentInfo, len(config.Members))
 	for i, member := range config.Members {
+		// Try to extract working directory from prompt first
+		cwd := extractCwdFromPrompt(member.Prompt)
+		// Fall back to cwd field if extraction failed
+		if cwd == "" {
+			cwd = member.Cwd
+		}
+
 		agents[i] = types.AgentInfo{
 			Name:         member.Name,
 			AgentID:      member.AgentID,
 			AgentType:    member.AgentType,
 			Status:       "unknown",
 			LastActivity: time.Now(),
-			Cwd:          member.Cwd,
+			Cwd:          cwd,
 		}
 	}
 
@@ -96,4 +105,21 @@ func ScanTeams(teamsDir string) ([]types.TeamInfo, error) {
 	}
 
 	return teams, nil
+}
+
+// extractCwdFromPrompt extracts working directory from agent prompt
+// Looks for patterns like "你的工作目录是 /path/to/directory"
+func extractCwdFromPrompt(prompt string) string {
+	if prompt == "" {
+		return ""
+	}
+
+	// Pattern to match: "你的工作目录是 /path/to/directory"
+	re := regexp.MustCompile(`你的工作目录是\s+(/[^\s\n]+)`)
+	matches := re.FindStringSubmatch(prompt)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+
+	return ""
 }

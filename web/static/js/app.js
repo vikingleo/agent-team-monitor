@@ -181,14 +181,109 @@ function renderTeam(team) {
             </div>
 
             <div class="team-section">
-                <h3>成员 (${team.members?.length || 0})</h3>
-                ${renderAgents(team.members || [])}
+                <h3>成员与任务 (${team.members?.length || 0} 成员, ${team.tasks?.length || 0} 任务)</h3>
+                ${renderAgentsWithTasks(team.members || [], team.tasks || [])}
             </div>
+        </div>
+    `;
+}
 
-            <div class="team-section">
-                <h3>任务 (${team.tasks?.length || 0})</h3>
-                ${renderTasks(team.tasks || [])}
+// Render agents with their tasks
+function renderAgentsWithTasks(agents, tasks) {
+    if (agents.length === 0) {
+        return '<p class="empty-state">无成员</p>';
+    }
+
+    // Create a map of agent names for quick lookup
+    const agentNames = new Set(agents.map(a => a.name));
+
+    // Create a map of tasks by owner
+    const tasksByOwner = {};
+    const unassignedTasks = [];
+
+    tasks.forEach(task => {
+        let owner = task.owner || '';
+
+        // If no owner, check if subject matches an agent name (for internal tasks)
+        if (!owner && task.subject && agentNames.has(task.subject)) {
+            owner = task.subject;
+        }
+
+        if (owner) {
+            if (!tasksByOwner[owner]) {
+                tasksByOwner[owner] = [];
+            }
+            tasksByOwner[owner].push(task);
+        } else {
+            unassignedTasks.push(task);
+        }
+    });
+
+    return `
+        <div class="agent-list">
+            ${agents.map(agent => renderAgentWithTasks(agent, tasksByOwner[agent.name] || [])).join('')}
+            ${unassignedTasks.length > 0 ? renderUnassignedTasks(unassignedTasks) : ''}
+        </div>
+    `;
+}
+
+// Render a single agent with their tasks
+function renderAgentWithTasks(agent, tasks) {
+    const statusClass = agent.status.toLowerCase();
+    const statusText = formatAgentStatus(agent.status);
+
+    // Only show current_task if it's not the agent's own name
+    const showCurrentTask = agent.current_task && agent.current_task !== agent.name;
+
+    // Format tool use display
+    const toolDisplay = agent.last_tool_use ?
+        `${agent.last_tool_use}${agent.last_tool_detail ? ': ' + agent.last_tool_detail : ''}` : '';
+
+    return `
+        <div class="agent-item">
+            <div class="agent-header">
+                <span class="agent-name">${escapeHtml(agent.name)}</span>
+                <span class="agent-type">[${escapeHtml(agent.agent_type)}]</span>
+                <span class="agent-status ${statusClass}">${statusText}</span>
             </div>
+            ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
+            ${agent.message_summary ? `<div class="agent-message">📨 ${escapeHtml(agent.message_summary)}</div>` : ''}
+            ${agent.last_thinking ? `<div class="agent-thinking">💭 ${escapeHtml(agent.last_thinking)}</div>` : ''}
+            ${toolDisplay ? `<div class="agent-tool">🔧 ${escapeHtml(toolDisplay)}</div>` : ''}
+            ${showCurrentTask ? `<div class="agent-task">当前: ${escapeHtml(agent.current_task)}</div>` : ''}
+            ${tasks.length > 0 ? `<div class="agent-tasks">${renderAgentTaskList(tasks)}</div>` : ''}
+        </div>
+    `;
+}
+
+// Render task list for an agent
+function renderAgentTaskList(tasks) {
+    return `
+        <div class="task-list-compact">
+            ${tasks.map(task => {
+                const statusClass = task.status.toLowerCase();
+                const statusText = formatTaskStatus(task.status);
+                return `
+                    <div class="task-item-compact">
+                        <span class="task-id">${escapeHtml(task.id)}</span>
+                        <span class="task-status ${statusClass}">${statusText}</span>
+                        <span class="task-subject-compact">${escapeHtml(task.subject)}</span>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+// Render unassigned tasks
+function renderUnassignedTasks(tasks) {
+    return `
+        <div class="agent-item unassigned">
+            <div class="agent-header">
+                <span class="agent-name">未分配任务</span>
+                <span class="agent-type">[${tasks.length}]</span>
+            </div>
+            <div class="agent-tasks">${renderAgentTaskList(tasks)}</div>
         </div>
     `;
 }

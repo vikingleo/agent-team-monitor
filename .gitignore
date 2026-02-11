@@ -34,3 +34,4 @@ Thumbs.db
 
 # Build artifacts
 *.log
+/monitor

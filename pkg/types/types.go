@@ -13,13 +13,21 @@ type TeamInfo struct {
 
 // AgentInfo represents an agent in a team
 type AgentInfo struct {
-	Name         string    `json:"name"`
-	AgentID      string    `json:"agent_id"`
-	AgentType    string    `json:"agent_type"`
-	Status       string    `json:"status"` // idle, working, completed
-	CurrentTask  string    `json:"current_task,omitempty"`
-	LastActivity time.Time `json:"last_activity"`
-	Cwd          string    `json:"cwd,omitempty"` // Working directory
+	Name            string    `json:"name"`
+	AgentID         string    `json:"agent_id"`
+	AgentType       string    `json:"agent_type"`
+	Status          string    `json:"status"` // idle, working, completed
+	CurrentTask     string    `json:"current_task,omitempty"`
+	LastActivity    time.Time `json:"last_activity"`
+	Cwd             string    `json:"cwd,omitempty"`             // Working directory
+	LatestMessage   string    `json:"latest_message,omitempty"`  // Latest inbox message
+	MessageSummary  string    `json:"message_summary,omitempty"` // Message summary
+	LastMessageTime time.Time `json:"last_message_time,omitempty"`
+	// Activity tracking from jsonl logs
+	LastThinking   string    `json:"last_thinking,omitempty"`    // Latest thinking/reasoning
+	LastToolUse    string    `json:"last_tool_use,omitempty"`    // Latest tool name (Read, Edit, Bash, etc.)
+	LastToolDetail string    `json:"last_tool_detail,omitempty"` // Tool usage details
+	LastActiveTime time.Time `json:"last_active_time,omitempty"` // Last activity timestamp from logs
 }
 
 // TaskInfo represents a task in the task list
