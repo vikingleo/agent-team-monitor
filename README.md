@@ -11,9 +11,11 @@
 ## 截图
 
 ### Web 面板
+
 ![Web Dashboard](static/web.png)
 
 ### 终端界面 (TUI)
+
 ![Terminal UI](static/TUI.png)
 
 ## 功能特性
@@ -40,10 +42,10 @@ make build
 ./bin/agent-team-monitor
 ```
 
-| 按键 | 操作 |
-|------|------|
-| `r` | 手动刷新 |
-| `q` / `Ctrl+C` | 退出 |
+| 按键           | 操作     |
+| -------------- | -------- |
+| `r`            | 手动刷新 |
+| `q` / `Ctrl+C` | 退出     |
 
 ### Web 模式
 
@@ -54,7 +56,7 @@ make build
 ./bin/agent-team-monitor -web -addr :3000
 ```
 
-浏览器打开 `http://localhost:8080`。
+浏览器打开 `http://localhost:3000`（默认是8080）。
 
 ## API 接口
 
@@ -66,7 +68,7 @@ GET /api/health     # 健康检查
 ```
 
 ```bash
-curl http://localhost:8080/api/state | jq
+curl http://localhost:3000/api/state | jq
 ```
 
 ## 工作原理
@@ -140,9 +142,11 @@ Real-time monitoring dashboard for [Claude Code](https://docs.anthropic.com/en/d
 ## Screenshots
 
 ### Web Dashboard
+
 ![Web Dashboard](static/web.png)
 
 ### Terminal UI (TUI)
+
 ![Terminal UI](static/TUI.png)
 
 ## Features
@@ -169,10 +173,10 @@ make build
 ./bin/agent-team-monitor
 ```
 
-| Key | Action |
-|-----|--------|
-| `r` | Manual refresh |
-| `q` / `Ctrl+C` | Quit |
+| Key            | Action         |
+| -------------- | -------------- |
+| `r`            | Manual refresh |
+| `q` / `Ctrl+C` | Quit           |
 
 ### Web Mode
 
@@ -183,7 +187,7 @@ make build
 ./bin/agent-team-monitor -web -addr :3000
 ```
 
-Open `http://localhost:8080` in your browser.
+Open `http://localhost:3000` in your browser(The default port number is 8080).
 
 ## API Endpoints
 
@@ -195,7 +199,7 @@ GET /api/health     # Health check
 ```
 
 ```bash
-curl http://localhost:8080/api/state | jq
+curl http://localhost:3000/api/state | jq
 ```
 
 ## How It Works
