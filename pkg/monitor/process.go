@@ -30,10 +30,11 @@ func (pm *ProcessMonitor) FindClaudeProcesses() ([]types.ProcessInfo, error) {
 			continue
 		}
 
-		// Look for claude-code or node processes running Claude
-		if strings.Contains(cmdline, "claude") ||
-		   strings.Contains(cmdline, "claude-code") ||
-		   strings.Contains(cmdline, "@anthropic-ai/claude-code") {
+		// Look for Claude Code processes by matching specific patterns
+		cmdLower := strings.ToLower(cmdline)
+		if strings.Contains(cmdLower, "@anthropic-ai/claude-code") ||
+		   strings.Contains(cmdLower, "claude-code") ||
+		   isClaudeCodeBinary(cmdLower) {
 
 			createTime, _ := p.CreateTime()
 			startedAt := time.Unix(createTime/1000, 0)
@@ -56,4 +57,14 @@ func (pm *ProcessMonitor) IsProcessRunning(pid int32) bool {
 		return false
 	}
 	return exists
+}
+
+// isClaudeCodeBinary checks if the command line refers to a claude-code binary
+func isClaudeCodeBinary(cmdLower string) bool {
+	parts := strings.Fields(cmdLower)
+	if len(parts) == 0 {
+		return false
+	}
+	exe := parts[0]
+	return exe == "claude" || strings.HasSuffix(exe, "/claude")
 }

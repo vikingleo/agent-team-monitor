@@ -4,11 +4,12 @@ import "time"
 
 // TeamInfo represents a Claude agent team
 type TeamInfo struct {
-	Name       string      `json:"name"`
-	CreatedAt  time.Time   `json:"created_at"`
-	Members    []AgentInfo `json:"members"`
-	Tasks      []TaskInfo  `json:"tasks"`
-	ConfigPath string      `json:"config_path"`
+	Name          string      `json:"name"`
+	CreatedAt     time.Time   `json:"created_at"`
+	LeadSessionID string      `json:"lead_session_id,omitempty"`
+	Members       []AgentInfo `json:"members"`
+	Tasks         []TaskInfo  `json:"tasks"`
+	ConfigPath    string      `json:"config_path"`
 }
 
 // AgentInfo represents an agent in a team
@@ -18,6 +19,9 @@ type AgentInfo struct {
 	AgentType       string    `json:"agent_type"`
 	Status          string    `json:"status"` // idle, working, completed
 	CurrentTask     string    `json:"current_task,omitempty"`
+	JoinedAt        time.Time `json:"joined_at,omitempty"`
+	RoleEmoji       string    `json:"role_emoji,omitempty"`       // Office persona emoji
+	OfficeDialogues []string  `json:"office_dialogues,omitempty"` // Shared office dialogue lines
 	LastActivity    time.Time `json:"last_activity"`
 	Cwd             string    `json:"cwd,omitempty"`             // Working directory
 	LatestMessage   string    `json:"latest_message,omitempty"`  // Latest inbox message

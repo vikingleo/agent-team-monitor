@@ -1,4 +1,4 @@
-.PHONY: build run run-web clean install test
+.PHONY: build run run-web clean install test build-all build-windows
 
 # Build the application
 build:
@@ -35,6 +35,13 @@ build-all:
 	GOOS=darwin GOARCH=arm64 go build -o bin/agent-team-monitor-darwin-arm64 ./cmd/monitor
 	GOOS=linux GOARCH=amd64 go build -o bin/agent-team-monitor-linux-amd64 ./cmd/monitor
 	GOOS=linux GOARCH=arm64 go build -o bin/agent-team-monitor-linux-arm64 ./cmd/monitor
+	GOOS=windows GOARCH=amd64 go build -o bin/agent-team-monitor-windows-amd64.exe ./cmd/monitor
+	GOOS=windows GOARCH=arm64 go build -o bin/agent-team-monitor-windows-arm64.exe ./cmd/monitor
+
+# Build Windows binaries
+build-windows:
+	GOOS=windows GOARCH=amd64 go build -o bin/agent-team-monitor-windows-amd64.exe ./cmd/monitor
+	GOOS=windows GOARCH=arm64 go build -o bin/agent-team-monitor-windows-arm64.exe ./cmd/monitor
 
 # Install globally
 install-global: build
@@ -60,6 +67,7 @@ help:
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make test           - Run tests"
 	@echo "  make build-all      - Build for all platforms"
+	@echo "  make build-windows  - Build Windows binaries (.exe)"
 	@echo "  make install-global - Install globally"
 	@echo "  make dev-tui        - Development mode (TUI)"
 	@echo "  make dev-web        - Development mode (Web)"

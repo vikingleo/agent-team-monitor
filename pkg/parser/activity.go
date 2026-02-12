@@ -3,8 +3,11 @@ package parser
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -40,6 +43,25 @@ type AgentActivity struct {
 	LastActiveTime time.Time // Last activity timestamp
 }
 
+// AgentLogCandidate represents a candidate subagent log matched for a member
+type AgentLogCandidate struct {
+	Path          string
+	AgentID       string
+	SessionID     string
+	Cwd           string
+	FirstActiveAt time.Time
+	LastActiveAt  time.Time
+}
+
+type activityRecord struct {
+	Type      string          `json:"type"`
+	Timestamp string          `json:"timestamp"`
+	AgentID   string          `json:"agentId"`
+	SessionID string          `json:"sessionId"`
+	Cwd       string          `json:"cwd"`
+	Message   json.RawMessage `json:"message"`
+}
+
 // ParseAgentActivity parses the agent's jsonl log file and extracts recent activity
 func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 	file, err := os.Open(logPath)
@@ -52,27 +74,43 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 	defer file.Close()
 
 	activity := &AgentActivity{}
-	scanner := bufio.NewScanner(file)
+	scanner := newLargeScanner(file)
 
-	// Read all lines to get the most recent entries
-	var lines []string
+	// Use a ring buffer to keep only the last N lines in memory
+	const tailSize = 50
+	ring := make([]string, tailSize)
+	ringIdx := 0
+	totalLines := 0
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		ring[ringIdx%tailSize] = scanner.Text()
+		ringIdx++
+		totalLines++
 	}
 
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
+	// Determine how many tail lines we have
+	count := totalLines
+	if count > tailSize {
+		count = tailSize
+	}
+
 	// Process lines in reverse to get most recent activity first
-	for i := len(lines) - 1; i >= 0 && i >= len(lines)-50; i-- {
-		var log ActivityLog
-		if err := json.Unmarshal([]byte(lines[i]), &log); err != nil {
+	for k := 0; k < count; k++ {
+		idx := (ringIdx - 1 - k) % tailSize
+		if idx < 0 {
+			idx += tailSize
+		}
+
+		var entry ActivityLog
+		if err := json.Unmarshal([]byte(ring[idx]), &entry); err != nil {
 			continue
 		}
 
 		// Parse timestamp
-		timestamp, err := time.Parse(time.RFC3339, log.Timestamp)
+		timestamp, err := time.Parse(time.RFC3339, entry.Timestamp)
 		if err != nil {
 			continue
 		}
@@ -83,12 +121,12 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 		}
 
 		// Only process assistant messages
-		if log.Type != "assistant" {
+		if entry.Type != "assistant" {
 			continue
 		}
 
 		var msg AssistantMessage
-		if err := json.Unmarshal(log.Message, &msg); err != nil {
+		if err := json.Unmarshal(entry.Message, &msg); err != nil {
 			continue
 		}
 
@@ -117,7 +155,7 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 			if item.Type == "tool_use" && activity.LastToolUse == "" {
 				activity.LastToolUse = item.Name
 				// Try to extract tool details from the raw message
-				activity.LastToolDetail = extractToolDetail(item.Name, log.Message)
+				activity.LastToolDetail = extractToolDetail(item.Name, entry.Message)
 			}
 		}
 
@@ -215,7 +253,7 @@ func FindAgentLogFileByCwd(projectsDir, cwd string) (string, string, error) {
 			}
 			defer file.Close()
 
-			scanner := bufio.NewScanner(file)
+			scanner := newLargeScanner(file)
 			if scanner.Scan() {
 				var log ActivityLog
 				if err := json.Unmarshal(scanner.Bytes(), &log); err != nil {
@@ -239,6 +277,298 @@ func FindAgentLogFileByCwd(projectsDir, cwd string) (string, string, error) {
 	}
 
 	return foundLogPath, foundAgentID, nil
+}
+
+// FindAgentLogFileForMember finds the best matching agent log file for a team member.
+// Strategy:
+// 1) Prefer logs under team's leadSessionId/subagents if available.
+// 2) Match logs whose text content includes "你是 {memberName}" or "You are {memberName}".
+// 3) Fallback to cwd match if no member-text match found.
+// 4) Pick the most recently active candidate.
+func FindAgentLogFileForMember(projectsDir, leadSessionID, memberName, cwd string, joinedAt time.Time) (string, string, error) {
+	if projectsDir == "" || memberName == "" {
+		return "", "", nil
+	}
+
+	aliases := memberAliases(memberName)
+	candidates, err := findMemberLogCandidates(projectsDir, leadSessionID, aliases, cwd, joinedAt)
+	if err != nil {
+		return "", "", err
+	}
+	if len(candidates) == 0 {
+		return "", "", nil
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if !joinedAt.IsZero() {
+			di := distanceFromJoinedAt(candidates[i], joinedAt)
+			dj := distanceFromJoinedAt(candidates[j], joinedAt)
+			if di != dj {
+				return di < dj
+			}
+		}
+
+		if candidates[i].LastActiveAt.Equal(candidates[j].LastActiveAt) {
+			return candidates[i].Path < candidates[j].Path
+		}
+		return candidates[i].LastActiveAt.After(candidates[j].LastActiveAt)
+	})
+
+	return candidates[0].Path, candidates[0].AgentID, nil
+}
+
+func findMemberLogCandidates(projectsDir, leadSessionID string, memberAliases []string, cwd string, joinedAt time.Time) ([]AgentLogCandidate, error) {
+
+	searchRoots := []string{}
+	if leadSessionID != "" {
+		searchRoots = append(searchRoots, filepath.Join(projectsDir, "*", leadSessionID, "subagents"))
+	}
+	searchRoots = append(searchRoots, filepath.Join(projectsDir, "*", "*", "subagents"))
+
+	seen := make(map[string]bool)
+	allLogs := make([]string, 0)
+	for _, pattern := range searchRoots {
+		matches, err := filepath.Glob(filepath.Join(pattern, "agent-*.jsonl"))
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			if !seen[match] {
+				seen[match] = true
+				allLogs = append(allLogs, match)
+			}
+		}
+	}
+
+	if len(allLogs) == 0 {
+		return nil, nil
+	}
+
+	matchedByMember := make([]AgentLogCandidate, 0)
+	fallbackByCwd := make([]AgentLogCandidate, 0)
+
+	for _, logPath := range allLogs {
+		candidate, memberMatched, cwdMatched, err := inspectLogCandidate(logPath, memberAliases, cwd)
+		if err != nil {
+			continue
+		}
+
+		if !joinedAt.IsZero() && !candidate.LastActiveAt.IsZero() && candidate.LastActiveAt.Before(joinedAt.Add(-2*time.Minute)) {
+			// Ignore stale historical sessions that ended before this member joined.
+			continue
+		}
+
+		if memberMatched {
+			matchedByMember = append(matchedByMember, candidate)
+			continue
+		}
+
+		if cwdMatched {
+			fallbackByCwd = append(fallbackByCwd, candidate)
+		}
+	}
+
+	if len(matchedByMember) > 0 {
+		return matchedByMember, nil
+	}
+
+	return fallbackByCwd, nil
+}
+
+func inspectLogCandidate(logPath string, memberAliases []string, cwd string) (AgentLogCandidate, bool, bool, error) {
+	file, err := os.Open(logPath)
+	if err != nil {
+		return AgentLogCandidate{}, false, false, err
+	}
+	defer file.Close()
+
+	scanner := newLargeScanner(file)
+	candidate := AgentLogCandidate{Path: logPath}
+	memberMatched := false
+	lineCount := 0
+
+	// Member identity hints are typically in the first few messages.
+	// Scan all lines for timestamps but only check member identity in the first 30 lines.
+	const identityScanLimit = 30
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var record activityRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			lineCount++
+			continue
+		}
+
+		if candidate.AgentID == "" {
+			candidate.AgentID = record.AgentID
+		}
+		if candidate.SessionID == "" {
+			candidate.SessionID = record.SessionID
+		}
+		if candidate.Cwd == "" {
+			candidate.Cwd = record.Cwd
+		}
+
+		if ts, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
+			if candidate.FirstActiveAt.IsZero() || ts.Before(candidate.FirstActiveAt) {
+				candidate.FirstActiveAt = ts
+			}
+			if candidate.LastActiveAt.IsZero() || ts.After(candidate.LastActiveAt) {
+				candidate.LastActiveAt = ts
+			}
+		}
+
+		if !memberMatched && lineCount < identityScanLimit && messageContainsMember(record.Message, memberAliases) {
+			memberMatched = true
+		}
+
+		lineCount++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return AgentLogCandidate{}, false, false, err
+	}
+
+	if candidate.AgentID == "" {
+		candidate.AgentID = strings.TrimSuffix(strings.TrimPrefix(filepath.Base(logPath), "agent-"), ".jsonl")
+	}
+
+	cwdMatched := cwd != "" && candidate.Cwd == cwd
+
+	return candidate, memberMatched, cwdMatched, nil
+}
+
+func messageContainsMember(raw json.RawMessage, aliases []string) bool {
+	if len(raw) == 0 || len(aliases) == 0 {
+		return false
+	}
+
+	var msg struct {
+		Content interface{} `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return false
+	}
+
+	checkText := func(text string) bool {
+		if text == "" {
+			return false
+		}
+		lower := strings.ToLower(text)
+		for _, alias := range aliases {
+			if alias == "" {
+				continue
+			}
+			if strings.Contains(lower, fmt.Sprintf("你是 %s", alias)) ||
+				strings.Contains(lower, fmt.Sprintf("you are %s", alias)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch content := msg.Content.(type) {
+	case string:
+		return checkText(content)
+	case []interface{}:
+		for _, item := range content {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			typeVal, _ := itemMap["type"].(string)
+			if typeVal != "text" {
+				continue
+			}
+			textVal, _ := itemMap["text"].(string)
+			if checkText(textVal) {
+				return true
+			}
+		}
+	}
+
+	// Fallback: structured content didn't match; skip raw string search to avoid false positives
+	return false
+}
+
+func newLargeScanner(file *os.File) *bufio.Scanner {
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+	return scanner
+}
+
+func distanceFromJoinedAt(candidate AgentLogCandidate, joinedAt time.Time) time.Duration {
+	if joinedAt.IsZero() {
+		return 0
+	}
+
+	base := candidate.FirstActiveAt
+	if base.IsZero() {
+		base = candidate.LastActiveAt
+	}
+	if base.IsZero() {
+		return time.Duration(1<<63 - 1)
+	}
+
+	delta := base.Sub(joinedAt)
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta
+}
+
+func memberAliases(memberName string) []string {
+	name := strings.ToLower(strings.TrimSpace(memberName))
+	if name == "" {
+		return nil
+	}
+
+	seen := map[string]bool{name: true}
+	aliases := []string{name}
+
+	re := regexp.MustCompile(`-[0-9]+$`)
+	base := re.ReplaceAllString(name, "")
+	if base != "" && !seen[base] {
+		aliases = append(aliases, base)
+		seen[base] = true
+	}
+
+	return aliases
+}
+
+// FindLeadSessionLogFile returns the lead session log file path, if it exists.
+func FindLeadSessionLogFile(projectsDir, leadSessionID string) (string, error) {
+	if projectsDir == "" || leadSessionID == "" {
+		return "", nil
+	}
+
+	pattern := filepath.Join(projectsDir, "*", leadSessionID+".jsonl")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", err
+	}
+	if len(matches) == 0 {
+		return "", nil
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	best := matches[0]
+	bestMod := time.Time{}
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil {
+			continue
+		}
+		if bestMod.IsZero() || info.ModTime().After(bestMod) {
+			best = match
+			bestMod = info.ModTime()
+		}
+	}
+
+	return best, nil
 }
 
 // FindAgentLogFile finds the agent's log file by matching agent ID (deprecated, use FindAgentLogFileByCwd)

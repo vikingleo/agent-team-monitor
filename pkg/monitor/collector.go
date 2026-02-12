@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/liaoweijun/agent-team-monitor/pkg/narrative"
 	"github.com/liaoweijun/agent-team-monitor/pkg/parser"
 	"github.com/liaoweijun/agent-team-monitor/pkg/types"
 )
@@ -19,6 +20,7 @@ type Collector struct {
 	state          *types.MonitorState
 	stateMutex     sync.RWMutex
 	updateChan     chan struct{}
+	stopOnce       sync.Once
 }
 
 // NewCollector creates a new data collector
@@ -135,6 +137,9 @@ func (c *Collector) updateState() {
 
 		// Update agent status based on all tasks (including internal)
 		c.updateAgentStatus(&teams[i], allTasks)
+
+		// Build shared office narrative fields for TUI/Web
+		c.buildAgentNarratives(&teams[i])
 	}
 
 	// Update state
@@ -162,16 +167,13 @@ func (c *Collector) loadAgentInboxes(team *types.TeamInfo, teamsDir string) {
 
 // loadAgentActivities loads recent activities from agent jsonl logs
 func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string) {
+	leadLogPath, _ := parser.FindLeadSessionLogFile(projectsDir, team.LeadSessionID)
+
 	for i := range team.Members {
 		agent := &team.Members[i]
 
-		// Skip if no working directory
-		if agent.Cwd == "" {
-			continue
-		}
-
-		// Find agent's log file by matching working directory
-		logPath, agentID, err := parser.FindAgentLogFileByCwd(projectsDir, agent.Cwd)
+		// Find agent's log file by member identity first, then cwd fallback
+		logPath, agentID, err := parser.FindAgentLogFileForMember(projectsDir, team.LeadSessionID, agent.Name, agent.Cwd, agent.JoinedAt)
 		if err != nil || logPath == "" || agentID == "" {
 			continue
 		}
@@ -189,14 +191,32 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 			agent.LastToolDetail = activity.LastToolDetail
 			agent.LastActiveTime = activity.LastActiveTime
 		}
+
+		// For team-lead, prefer lead session root log when more recent.
+		if agent.Name == "team-lead" && leadLogPath != "" {
+			leadActivity, err := parser.ParseAgentActivity(leadLogPath)
+			if err == nil && leadActivity != nil {
+				if activity == nil || leadActivity.LastActiveTime.After(activity.LastActiveTime) {
+					agent.LastThinking = leadActivity.LastThinking
+					agent.LastToolUse = leadActivity.LastToolUse
+					agent.LastToolDetail = leadActivity.LastToolDetail
+					agent.LastActiveTime = leadActivity.LastActiveTime
+				}
+			}
+		}
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// buildAgentNarratives populates shared fields used by both TUI and Web UI
+func (c *Collector) buildAgentNarratives(team *types.TeamInfo) {
+	tasksByOwner, _ := narrative.GroupTasksByOwner(team.Members, team.Tasks)
+	now := time.Now()
+
+	for i := range team.Members {
+		agent := &team.Members[i]
+		agent.RoleEmoji = narrative.RoleEmoji(agent.Name)
+		agent.OfficeDialogues = narrative.BuildAgentDialogues(*agent, tasksByOwner[agent.Name], now)
 	}
-	return b
 }
 
 // updateAgentStatus updates agent status based on their tasks
@@ -248,7 +268,7 @@ func (c *Collector) updateAgentStatus(team *types.TeamInfo, allTasks []types.Tas
 			if hasCompletedTasks {
 				agent.Status = "idle"
 			} else {
-				agent.Status = "idle"
+				agent.Status = "unknown"
 			}
 		}
 	}
@@ -265,6 +285,10 @@ func (c *Collector) GetState() types.MonitorState {
 
 // Stop stops the collector
 func (c *Collector) Stop() error {
-	close(c.updateChan)
-	return c.fsMonitor.Stop()
+	var err error
+	c.stopOnce.Do(func() {
+		close(c.updateChan)
+		err = c.fsMonitor.Stop()
+	})
+	return err
 }

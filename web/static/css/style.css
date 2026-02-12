@@ -18,6 +18,8 @@
     --working-color: #00FF00;
     --idle-color: #FFFF00;
     --completed-color: #888888;
+    --bubble-primary: #2f335f;
+    --bubble-secondary: #242846;
 }
 
 body {
@@ -197,7 +199,7 @@ main {
 /* Teams - 紧凑型网格布局，增加最小宽度 */
 .teams-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
     gap: 15px;
 }
 
@@ -241,10 +243,28 @@ main {
     font-weight: 600;
 }
 
+.office-scene {
+    background: rgba(125, 86, 244, 0.06);
+    border: 1px solid rgba(125, 86, 244, 0.2);
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.office-hint {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+}
+
 /* Agents - 紧凑型 */
 .agent-list {
     display: grid;
-    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.office-floor {
+    gap: 10px;
 }
 
 .agent-item {
@@ -260,6 +280,70 @@ main {
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.office-desk {
+    border-left-width: 4px;
+    border-left-color: var(--success-color);
+    background: linear-gradient(145deg, rgba(4, 181, 117, 0.12), rgba(4, 181, 117, 0.06));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.office-desk.working {
+    border-left-color: #3bff9d;
+}
+
+.office-desk.idle {
+    border-left-color: #ffd84a;
+    background: linear-gradient(145deg, rgba(255, 216, 74, 0.14), rgba(255, 216, 74, 0.05));
+}
+
+.office-desk.completed {
+    border-left-color: #8a8a8a;
+    background: linear-gradient(145deg, rgba(138, 138, 138, 0.14), rgba(138, 138, 138, 0.05));
+}
+
+.office-desk.active-motion {
+    border-color: rgba(59, 255, 157, 0.8);
+    box-shadow: 0 0 0 1px rgba(59, 255, 157, 0.45), 0 0 18px rgba(59, 255, 157, 0.25);
+    animation: deskPulse 1.6s ease-in-out infinite;
+}
+
+.office-desk.active-motion .agent-avatar {
+    background: rgba(59, 255, 157, 0.22);
+    box-shadow: 0 0 0 1px rgba(59, 255, 157, 0.4);
+}
+
+.office-desk.active-motion .agent-bubble.primary {
+    border-color: rgba(59, 255, 157, 0.5);
+}
+
+.office-desk.idle-motion {
+    opacity: 0.92;
+}
+
+@keyframes deskPulse {
+    0% {
+        box-shadow: 0 0 0 1px rgba(59, 255, 157, 0.40), 0 0 12px rgba(59, 255, 157, 0.18);
+    }
+    50% {
+        box-shadow: 0 0 0 1px rgba(59, 255, 157, 0.72), 0 0 28px rgba(59, 255, 157, 0.35);
+    }
+    100% {
+        box-shadow: 0 0 0 1px rgba(59, 255, 157, 0.40), 0 0 12px rgba(59, 255, 157, 0.18);
+    }
+}
+
+.agent-avatar {
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    font-size: 0.85rem;
 }
 
 .agent-name {
@@ -293,6 +377,54 @@ main {
 .agent-status.completed {
     background: rgba(136, 136, 136, 0.2);
     color: var(--completed-color);
+}
+
+.agent-activity {
+    margin-left: auto;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 2px 7px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+
+.agent-activity.active {
+    color: #3bff9d;
+    background: rgba(59, 255, 157, 0.14);
+    border-color: rgba(59, 255, 157, 0.45);
+}
+
+.agent-activity.idle {
+    color: #b8bdd6;
+    background: rgba(184, 189, 214, 0.1);
+    border-color: rgba(184, 189, 214, 0.25);
+}
+
+.agent-dialogues {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.agent-bubble {
+    padding: 5px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    line-height: 1.35;
+}
+
+.agent-bubble.primary {
+    background: var(--bubble-primary);
+    border: 1px solid rgba(125, 86, 244, 0.45);
+    color: #efefff;
+}
+
+.agent-bubble.secondary {
+    background: var(--bubble-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #d8dbf8;
 }
 
 .agent-task {
@@ -335,10 +467,16 @@ main {
 
 /* Agent tasks container */
 .agent-tasks {
-    margin-top: 6px;
+    margin-top: 8px;
     margin-left: 10px;
     padding-left: 10px;
-    border-left: 2px solid var(--border-color);
+    border-left: 2px dashed rgba(255, 255, 255, 0.2);
+}
+
+.task-list-title {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    margin-bottom: 4px;
 }
 
 /* Compact task list inside agent */
@@ -368,6 +506,10 @@ main {
 .agent-item.unassigned {
     background: rgba(255, 165, 0, 0.1);
     border-left-color: var(--warning-color);
+}
+
+.office-broadcast {
+    background: linear-gradient(145deg, rgba(255, 165, 0, 0.16), rgba(255, 165, 0, 0.05));
 }
 
 /* Tasks - 紧凑型 */
@@ -460,6 +602,10 @@ footer a:hover {
         grid-template-columns: 1fr;
     }
 
+    .agent-list {
+        grid-template-columns: 1fr;
+    }
+
     header h1 {
         font-size: 1.3rem;
     }
@@ -479,14 +625,17 @@ footer a:hover {
 
 @media (max-width: 1200px) {
     .teams-grid {
-        grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    }
+
+    .agent-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
-/* 移除动画以避免闪烁 */
+/* 保留工位活动动画，移除其他过渡避免闪烁 */
 .team-card,
 .process-item,
-.agent-item,
 .task-item {
     transition: none;
 }

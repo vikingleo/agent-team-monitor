@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/liaoweijun/agent-team-monitor/pkg/monitor"
+	"github.com/liaoweijun/agent-team-monitor/pkg/narrative"
 	"github.com/liaoweijun/agent-team-monitor/pkg/types"
 )
 
@@ -44,6 +45,42 @@ var (
 
 	statusCompletedStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#888888"))
+
+	officeSectionStyle = lipgloss.NewStyle().
+				Underline(true).
+				Foreground(lipgloss.Color("#A88CFF"))
+
+	officeHintStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			MarginLeft(2)
+
+	dialoguePrimaryStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#EFEFFF")).
+				Background(lipgloss.Color("#2F335F")).
+				Padding(0, 1).
+				MarginLeft(4)
+
+	dialogueSecondaryStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#D8DBF8")).
+				Background(lipgloss.Color("#242846")).
+				Padding(0, 1).
+				MarginLeft(4)
+
+	agentMetaStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			MarginLeft(4)
+
+	taskTitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9AA0D6")).
+			MarginLeft(4)
+
+	broadcastStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFA500")).
+			MarginLeft(2)
+
+	taskOverviewStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#E0E0E0")).
+				MarginLeft(2)
 )
 
 type model struct {
@@ -149,109 +186,155 @@ func (m model) View() string {
 func (m model) renderTeam(team types.TeamInfo) string {
 	var b strings.Builder
 
-	// Team header
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("团队: %s", team.Name)))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("创建时间: %s", team.CreatedAt.Format("2006-01-02 15:04"))))
 	b.WriteString("\n\n")
 
-	// Build task-by-owner map (same logic as web UI)
-	agentNames := make(map[string]bool)
+	workingCount := 0
 	for _, agent := range team.Members {
-		agentNames[agent.Name] = true
-	}
-	tasksByOwner := make(map[string][]types.TaskInfo)
-	var unassignedTasks []types.TaskInfo
-	for _, task := range team.Tasks {
-		owner := task.Owner
-		if owner == "" && task.Subject != "" && agentNames[task.Subject] {
-			owner = task.Subject
-		}
-		if owner != "" {
-			tasksByOwner[owner] = append(tasksByOwner[owner], task)
-		} else {
-			unassignedTasks = append(unassignedTasks, task)
+		if agent.Status == "working" {
+			workingCount++
 		}
 	}
 
-	// Section header
-	b.WriteString(lipgloss.NewStyle().Underline(true).Render(
-		fmt.Sprintf("成员与任务 (%d 成员, %d 任务)", len(team.Members), len(team.Tasks))))
+	tasksByOwner, unassignedTasks := narrative.GroupTasksByOwner(team.Members, team.Tasks)
+
+	b.WriteString(officeSectionStyle.Render(
+		fmt.Sprintf("🏢 办公区实况 (%d 位同事, %d 位忙碌中)", len(team.Members), workingCount)))
+	b.WriteString("\n")
+	b.WriteString(officeHintStyle.Render("每位成员用“人话”同步当前状态、思路和工具动作。"))
 	b.WriteString("\n")
 
 	if len(team.Members) == 0 {
 		b.WriteString(agentStyle.Render("  无成员"))
 		b.WriteString("\n")
 	} else {
-		detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).MarginLeft(2)
-		thinkingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#DAA520")).MarginLeft(2)
-		toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).MarginLeft(2)
-		messageStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB")).MarginLeft(2)
-
 		for _, agent := range team.Members {
-			statusStr := m.formatStatus(agent.Status)
-			agentInfo := fmt.Sprintf("  • %s [%s] - %s", agent.Name, agent.AgentType, statusStr)
-			// Only show current_task if it's not the agent's own name (same as web)
-			if agent.CurrentTask != "" && agent.CurrentTask != agent.Name {
-				agentInfo += fmt.Sprintf(" (当前: %s)", agent.CurrentTask)
-			}
-			b.WriteString(agentStyle.Render(agentInfo))
-			b.WriteString("\n")
-
-			// Working directory
-			if agent.Cwd != "" {
-				b.WriteString(detailStyle.Render(fmt.Sprintf("    📁 %s", agent.Cwd)))
-				b.WriteString("\n")
-			}
-
-			// Inbox message summary
-			if agent.MessageSummary != "" {
-				b.WriteString(messageStyle.Render(fmt.Sprintf("    📨 %s", agent.MessageSummary)))
-				b.WriteString("\n")
-			}
-
-			// Last thinking
-			if agent.LastThinking != "" {
-				b.WriteString(thinkingStyle.Render(fmt.Sprintf("    💭 %s", agent.LastThinking)))
-				b.WriteString("\n")
-			}
-
-			// Last tool use
-			if agent.LastToolUse != "" {
-				toolInfo := agent.LastToolUse
-				if agent.LastToolDetail != "" {
-					toolInfo += ": " + agent.LastToolDetail
-				}
-				b.WriteString(toolStyle.Render(fmt.Sprintf("    🔧 %s", toolInfo)))
-				b.WriteString("\n")
-			}
-
-			// Agent's tasks (grouped under agent, same as web)
-			if tasks, ok := tasksByOwner[agent.Name]; ok && len(tasks) > 0 {
-				for _, task := range tasks {
-					statusStr := m.formatTaskStatus(task.Status)
-					taskInfo := fmt.Sprintf("      %s %s %s", task.ID, statusStr, task.Subject)
-					b.WriteString(taskStyle.Render(taskInfo))
-					b.WriteString("\n")
-				}
-			}
+			b.WriteString(m.renderAgentDesk(agent, tasksByOwner[agent.Name]))
 		}
 	}
 
-	// Unassigned tasks
 	if len(unassignedTasks) > 0 {
+		b.WriteString(m.renderBroadcastDesk(unassignedTasks))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(officeSectionStyle.Render(fmt.Sprintf("📋 任务总览 (%d 项)", len(team.Tasks))))
+	b.WriteString("\n")
+
+	if len(team.Tasks) == 0 {
+		b.WriteString(taskOverviewStyle.Render("  暂无任务"))
 		b.WriteString("\n")
-		b.WriteString(agentStyle.Render(fmt.Sprintf("  • 未分配任务 [%d]", len(unassignedTasks))))
-		b.WriteString("\n")
-		for _, task := range unassignedTasks {
+	} else {
+		for _, task := range team.Tasks {
+			owner := task.Owner
+			if owner == "" {
+				owner = "未分配"
+			}
 			statusStr := m.formatTaskStatus(task.Status)
-			taskInfo := fmt.Sprintf("      %s %s %s", task.ID, statusStr, task.Subject)
-			b.WriteString(taskStyle.Render(taskInfo))
+			taskLine := fmt.Sprintf("  #%s %s %s · 负责人: %s",
+				task.ID,
+				statusStr,
+				narrative.NormalizeDialogText(task.Subject, 40),
+				owner,
+			)
+			b.WriteString(taskOverviewStyle.Render(taskLine))
 			b.WriteString("\n")
 		}
 	}
 
 	return b.String()
+}
+
+func (m model) renderAgentDesk(agent types.AgentInfo, tasks []types.TaskInfo) string {
+	var b strings.Builder
+
+	header := fmt.Sprintf("  %s %s [%s] · %s",
+		m.agentRoleEmoji(agent),
+		agent.Name,
+		agent.AgentType,
+		m.formatStatus(agent.Status),
+	)
+	b.WriteString(agentStyle.Render(header))
+	b.WriteString("\n")
+
+	dialogues := m.agentDialogues(agent, tasks)
+	for i, dialogue := range dialogues {
+		prefix := "💬"
+		style := dialoguePrimaryStyle
+		if i > 0 {
+			prefix = "🗨"
+			style = dialogueSecondaryStyle
+		}
+
+		b.WriteString(style.Render(fmt.Sprintf("%s %s", prefix, dialogue)))
+		b.WriteString("\n")
+	}
+
+	if agent.Cwd != "" {
+		b.WriteString(agentMetaStyle.Render(fmt.Sprintf("📁 %s", agent.Cwd)))
+		b.WriteString("\n")
+	}
+
+	if len(tasks) > 0 {
+		b.WriteString(taskTitleStyle.Render("我手上的任务"))
+		b.WriteString("\n")
+		for _, task := range tasks {
+			statusStr := m.formatTaskStatus(task.Status)
+			taskLine := fmt.Sprintf("    %s %s %s",
+				task.ID,
+				statusStr,
+				narrative.NormalizeDialogText(task.Subject, 46),
+			)
+			b.WriteString(taskStyle.Render(taskLine))
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m model) renderBroadcastDesk(tasks []types.TaskInfo) string {
+	var b strings.Builder
+
+	b.WriteString(broadcastStyle.Render(fmt.Sprintf("  📣 前台广播 [%d 条待认领任务]", len(tasks))))
+	b.WriteString("\n")
+	b.WriteString(dialoguePrimaryStyle.Render(
+		fmt.Sprintf("💬 有 %d 项任务暂未分配，欢迎同事主动认领。", len(tasks)),
+	))
+	b.WriteString("\n")
+
+	for _, task := range tasks {
+		statusStr := m.formatTaskStatus(task.Status)
+		taskLine := fmt.Sprintf("    %s %s %s",
+			task.ID,
+			statusStr,
+			narrative.NormalizeDialogText(task.Subject, 46),
+		)
+		b.WriteString(taskStyle.Render(taskLine))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m model) agentDialogues(agent types.AgentInfo, tasks []types.TaskInfo) []string {
+	if len(agent.OfficeDialogues) > 0 {
+		return agent.OfficeDialogues
+	}
+
+	return narrative.BuildAgentDialogues(agent, tasks, time.Now())
+}
+
+func (m model) agentRoleEmoji(agent types.AgentInfo) string {
+	if agent.RoleEmoji != "" {
+		return agent.RoleEmoji
+	}
+
+	return narrative.RoleEmoji(agent.Name)
 }
 
 func (m model) formatStatus(status string) string {

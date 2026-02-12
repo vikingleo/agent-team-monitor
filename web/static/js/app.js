@@ -172,6 +172,9 @@ function updateTeams(teams) {
 // Render a single team
 function renderTeam(team) {
     const createdDate = new Date(team.created_at).toLocaleString('zh-CN');
+    const members = team.members || [];
+    const tasks = team.tasks || [];
+    const workingCount = members.filter(member => member.status === 'working').length;
 
     return `
         <div class="team-card">
@@ -180,31 +183,28 @@ function renderTeam(team) {
                 <div class="team-created">创建时间: ${createdDate}</div>
             </div>
 
+            <div class="team-section office-scene">
+                <h3>🏢 办公区实况 (${members.length} 位同事, ${workingCount} 位忙碌中)</h3>
+                <p class="office-hint">每位成员用“人话”同步当前状态、思路和工具动作。</p>
+                ${renderAgentsWithTasks(members, tasks)}
+            </div>
+
             <div class="team-section">
-                <h3>成员与任务 (${team.members?.length || 0} 成员, ${team.tasks?.length || 0} 任务)</h3>
-                ${renderAgentsWithTasks(team.members || [], team.tasks || [])}
+                <h3>📋 任务总览 (${tasks.length} 项)</h3>
+                ${tasks.length > 0 ? renderAgentTaskList(tasks) : '<p class="empty-state">暂无任务</p>'}
             </div>
         </div>
     `;
 }
 
-// Render agents with their tasks
-function renderAgentsWithTasks(agents, tasks) {
-    if (agents.length === 0) {
-        return '<p class="empty-state">无成员</p>';
-    }
-
-    // Create a map of agent names for quick lookup
-    const agentNames = new Set(agents.map(a => a.name));
-
-    // Create a map of tasks by owner
+function groupTasksByOwner(agents, tasks) {
+    const agentNames = new Set(agents.map(agent => agent.name));
     const tasksByOwner = {};
     const unassignedTasks = [];
 
     tasks.forEach(task => {
         let owner = task.owner || '';
 
-        // If no owner, check if subject matches an agent name (for internal tasks)
         if (!owner && task.subject && agentNames.has(task.subject)) {
             owner = task.subject;
         }
@@ -219,39 +219,214 @@ function renderAgentsWithTasks(agents, tasks) {
         }
     });
 
+    return { tasksByOwner, unassignedTasks };
+}
+
+// Render agents with their tasks
+function renderAgentsWithTasks(agents, tasks) {
+    if (agents.length === 0) {
+        return '<p class="empty-state">无成员</p>';
+    }
+
+    const { tasksByOwner, unassignedTasks } = groupTasksByOwner(agents, tasks);
+
     return `
-        <div class="agent-list">
+        <div class="agent-list office-floor">
             ${agents.map(agent => renderAgentWithTasks(agent, tasksByOwner[agent.name] || [])).join('')}
             ${unassignedTasks.length > 0 ? renderUnassignedTasks(unassignedTasks) : ''}
         </div>
     `;
 }
 
+function getRoleEmoji(agent) {
+    if (agent.role_emoji) {
+        return agent.role_emoji;
+    }
+
+    const normalizedName = (agent.name || '').toLowerCase();
+
+    if (normalizedName.includes('lead')) {
+        return '🧑‍💼';
+    }
+    if (normalizedName.includes('api')) {
+        return '👨‍💻';
+    }
+    if (normalizedName.includes('admin')) {
+        return '🧑‍🔧';
+    }
+    if (normalizedName.includes('vue')) {
+        return '🧑‍🎨';
+    }
+    if (normalizedName.includes('uniapp')) {
+        return '🧑‍📱';
+    }
+
+    return '🧑';
+}
+
+function normalizeDialogText(text, maxLength = 90) {
+    if (!text) {
+        return '';
+    }
+
+    const normalized = String(text).replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+
+    return `${normalized.slice(0, maxLength)}...`;
+}
+
+function isValidTimestamp(timestamp) {
+    if (!timestamp) {
+        return false;
+    }
+
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) {
+        return false;
+    }
+
+    return parsed.getFullYear() > 1971;
+}
+
+function formatRelativeTime(timestamp) {
+    if (!isValidTimestamp(timestamp)) {
+        return '';
+    }
+
+    const now = Date.now();
+    const target = new Date(timestamp).getTime();
+    const diffSeconds = Math.max(0, Math.floor((now - target) / 1000));
+
+    if (diffSeconds < 60) {
+        return `${diffSeconds}秒前`;
+    }
+
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (diffMinutes < 60) {
+        return `${diffMinutes}分钟前`;
+    }
+
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) {
+        return `${diffHours}小时前`;
+    }
+
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}天前`;
+}
+
+function getTimestampAgeSeconds(timestamp) {
+    if (!isValidTimestamp(timestamp)) {
+        return null;
+    }
+
+    const now = Date.now();
+    const target = new Date(timestamp).getTime();
+    const diffSeconds = Math.floor((now - target) / 1000);
+    return Math.max(0, diffSeconds);
+}
+
+function isAgentInMotion(agent) {
+    const lastActiveAge = getTimestampAgeSeconds(agent.last_active_time);
+    const lastMessageAge = getTimestampAgeSeconds(agent.last_message_time);
+
+    const hasRecentSignal =
+        (lastActiveAge !== null && lastActiveAge <= 180) ||
+        (lastMessageAge !== null && lastMessageAge <= 180);
+
+    const hasActionPayload = Boolean(agent.last_tool_use || agent.last_thinking || agent.message_summary);
+
+    return hasRecentSignal || (agent.status === 'working' && hasActionPayload);
+}
+
+function getAgentMotionLabel(agent, moving) {
+    if (moving) {
+        return '⚡ 正在活动';
+    }
+
+    const lastActiveText = formatRelativeTime(agent.last_active_time);
+    if (lastActiveText) {
+        return `○ 最近动作 ${lastActiveText}`;
+    }
+
+    return '○ 工位待命';
+}
+
+function buildAgentDialogues(agent, tasks) {
+    if (Array.isArray(agent.office_dialogues) && agent.office_dialogues.length > 0) {
+        return agent.office_dialogues
+            .map(line => normalizeDialogText(line, 100))
+            .filter(Boolean)
+            .slice(0, 3);
+    }
+
+    const dialogues = [];
+    const showCurrentTask = agent.current_task && agent.current_task !== agent.name;
+    const activeTask = tasks.find(task => task.status === 'in_progress') || tasks[0];
+
+    if (showCurrentTask) {
+        dialogues.push(`我正在推进「${normalizeDialogText(agent.current_task, 60)}」`);
+    } else if (activeTask) {
+        dialogues.push(`我在处理任务 #${activeTask.id}：${normalizeDialogText(activeTask.subject, 60)}`);
+    }
+
+    if (agent.last_tool_use) {
+        const toolDetail = agent.last_tool_detail ? `（${normalizeDialogText(agent.last_tool_detail, 45)}）` : '';
+        dialogues.push(`我刚使用了 ${agent.last_tool_use}${toolDetail}`);
+    }
+
+    if (agent.last_thinking) {
+        dialogues.push(`我在想：${normalizeDialogText(agent.last_thinking)}`);
+    }
+
+    if (agent.message_summary) {
+        dialogues.push(`我刚收到：${normalizeDialogText(agent.message_summary)}`);
+    }
+
+    if (dialogues.length === 0) {
+        if (agent.status === 'working') {
+            dialogues.push('我正专注处理中，稍后同步最新进展。');
+        } else if (agent.status === 'completed') {
+            dialogues.push('我这边已完成本轮工作，等待下一项安排。');
+        } else {
+            dialogues.push('我这边空闲待命，随时可以接新任务。');
+        }
+    }
+
+    const lastActiveText = formatRelativeTime(agent.last_active_time);
+    if (lastActiveText) {
+        dialogues.push(`我最后一次动作是 ${lastActiveText}`);
+    }
+
+    return dialogues.slice(0, 3);
+}
+
 // Render a single agent with their tasks
 function renderAgentWithTasks(agent, tasks) {
     const statusClass = agent.status.toLowerCase();
     const statusText = formatAgentStatus(agent.status);
-
-    // Only show current_task if it's not the agent's own name
-    const showCurrentTask = agent.current_task && agent.current_task !== agent.name;
-
-    // Format tool use display
-    const toolDisplay = agent.last_tool_use ?
-        `${agent.last_tool_use}${agent.last_tool_detail ? ': ' + agent.last_tool_detail : ''}` : '';
+    const dialogues = buildAgentDialogues(agent, tasks);
+    const roleEmoji = getRoleEmoji(agent);
+    const moving = isAgentInMotion(agent);
+    const motionClass = moving ? 'active-motion' : 'idle-motion';
+    const motionLabel = getAgentMotionLabel(agent, moving);
 
     return `
-        <div class="agent-item">
+        <div class="agent-item office-desk ${statusClass} ${motionClass}">
             <div class="agent-header">
+                <span class="agent-avatar" aria-hidden="true">${roleEmoji}</span>
                 <span class="agent-name">${escapeHtml(agent.name)}</span>
                 <span class="agent-type">[${escapeHtml(agent.agent_type)}]</span>
                 <span class="agent-status ${statusClass}">${statusText}</span>
+                <span class="agent-activity ${moving ? 'active' : 'idle'}">${escapeHtml(motionLabel)}</span>
+            </div>
+            <div class="agent-dialogues">
+                ${dialogues.map((dialogue, index) => `<div class="agent-bubble ${index === 0 ? 'primary' : 'secondary'}">${escapeHtml(dialogue)}</div>`).join('')}
             </div>
             ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
-            ${agent.message_summary ? `<div class="agent-message">📨 ${escapeHtml(agent.message_summary)}</div>` : ''}
-            ${agent.last_thinking ? `<div class="agent-thinking">💭 ${escapeHtml(agent.last_thinking)}</div>` : ''}
-            ${toolDisplay ? `<div class="agent-tool">🔧 ${escapeHtml(toolDisplay)}</div>` : ''}
-            ${showCurrentTask ? `<div class="agent-task">当前: ${escapeHtml(agent.current_task)}</div>` : ''}
-            ${tasks.length > 0 ? `<div class="agent-tasks">${renderAgentTaskList(tasks)}</div>` : ''}
+            ${tasks.length > 0 ? `<div class="agent-tasks"><div class="task-list-title">我手上的任务</div>${renderAgentTaskList(tasks)}</div>` : ''}
         </div>
     `;
 }
@@ -278,10 +453,14 @@ function renderAgentTaskList(tasks) {
 // Render unassigned tasks
 function renderUnassignedTasks(tasks) {
     return `
-        <div class="agent-item unassigned">
+        <div class="agent-item unassigned office-broadcast">
             <div class="agent-header">
-                <span class="agent-name">未分配任务</span>
-                <span class="agent-type">[${tasks.length}]</span>
+                <span class="agent-avatar" aria-hidden="true">📣</span>
+                <span class="agent-name">前台广播</span>
+                <span class="agent-type">[${tasks.length} 条待认领任务]</span>
+            </div>
+            <div class="agent-dialogues">
+                <div class="agent-bubble primary">有 ${tasks.length} 项任务暂未分配，欢迎同事主动认领。</div>
             </div>
             <div class="agent-tasks">${renderAgentTaskList(tasks)}</div>
         </div>

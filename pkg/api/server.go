@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/liaoweijun/agent-team-monitor/pkg/monitor"
@@ -16,7 +18,7 @@ type Server struct {
 }
 
 // NewServer creates a new API server
-func NewServer(collector *monitor.Collector, addr string) *Server {
+func NewServer(collector *monitor.Collector, addr string, staticFS fs.FS) *Server {
 	s := &Server{
 		collector: collector,
 	}
@@ -29,8 +31,8 @@ func NewServer(collector *monitor.Collector, addr string) *Server {
 	mux.HandleFunc("/api/processes", s.handleGetProcesses)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
-	// Static files
-	mux.Handle("/", http.FileServer(http.Dir("web/static")))
+	// Embedded static files
+	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	s.httpServer = &http.Server{
 		Addr:         addr,
@@ -103,11 +105,15 @@ func respondJSON(w http.ResponseWriter, data interface{}) {
 	}
 }
 
-// corsMiddleware adds CORS headers
+// corsMiddleware adds CORS headers, restricting to localhost origins
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		origin := r.Header.Get("Origin")
+		if isAllowedOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {
@@ -117,4 +123,25 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isAllowedOrigin checks if the origin is a localhost variant
+func isAllowedOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	allowedPrefixes := []string{
+		"http://localhost",
+		"http://127.0.0.1",
+		"http://[::1]",
+		"https://localhost",
+		"https://127.0.0.1",
+		"https://[::1]",
+	}
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(origin, prefix) {
+			return true
+		}
+	}
+	return false
 }

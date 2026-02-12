@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 	"github.com/liaoweijun/agent-team-monitor/pkg/api"
 	"github.com/liaoweijun/agent-team-monitor/pkg/monitor"
 	"github.com/liaoweijun/agent-team-monitor/pkg/ui"
+	"github.com/liaoweijun/agent-team-monitor/web"
 )
 
 var (
@@ -20,7 +22,7 @@ var (
 )
 
 const (
-	appVersion = "1.1.0"
+	appVersion = "1.2.0"
 	appName    = "Claude Agent Team Monitor"
 )
 
@@ -73,8 +75,14 @@ func runTUIMode(collector *monitor.Collector, sigChan chan os.Signal) {
 }
 
 func runWebMode(collector *monitor.Collector, sigChan chan os.Signal) {
+	// Create embedded static filesystem
+	staticFS, err := fs.Sub(web.StaticFiles, "static")
+	if err != nil {
+		log.Fatalf("Failed to load embedded static files: %v", err)
+	}
+
 	// Create and start web server
-	server := api.NewServer(collector, *webAddr)
+	server := api.NewServer(collector, *webAddr, staticFS)
 
 	// Handle shutdown
 	go func() {
@@ -88,7 +96,7 @@ func runWebMode(collector *monitor.Collector, sigChan chan os.Signal) {
 	}()
 
 	// Start server
-	fmt.Printf("🌐 Web dashboard available at http://localhost%s\n", *webAddr)
+	fmt.Printf("Web dashboard available at http://localhost%s\n", *webAddr)
 	fmt.Println("Press Ctrl+C to stop")
 
 	if err := server.Start(); err != nil {
