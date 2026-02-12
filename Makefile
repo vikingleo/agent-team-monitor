@@ -1,4 +1,4 @@
-.PHONY: build run run-web clean install test build-all build-windows
+.PHONY: build run run-web clean install test build-all build-windows release
 
 # Build the application
 build:
@@ -56,6 +56,12 @@ dev-web:
 	@echo "Starting web server on http://localhost:8080"
 	@go run ./cmd/monitor -web
 
+# One-click release: build all platforms + create GitHub Release
+# Usage: make release          (uses latest git tag)
+#        make release V=v1.3.0 (specify version)
+release:
+	@./scripts/release.sh $(V)
+
 # Show help
 help:
 	@echo "Available commands:"
@@ -68,6 +74,7 @@ help:
 	@echo "  make test           - Run tests"
 	@echo "  make build-all      - Build for all platforms"
 	@echo "  make build-windows  - Build Windows binaries (.exe)"
+	@echo "  make release        - One-click build + GitHub Release (V=v1.3.0)"
 	@echo "  make install-global - Install globally"
 	@echo "  make dev-tui        - Development mode (TUI)"
 	@echo "  make dev-web        - Development mode (Web)"
