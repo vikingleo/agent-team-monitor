@@ -167,13 +167,15 @@ func (c *Collector) loadAgentInboxes(team *types.TeamInfo, teamsDir string) {
 
 // loadAgentActivities loads recent activities from agent jsonl logs
 func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string) {
+	homeDir, _ := os.UserHomeDir()
+	todosDir := filepath.Join(homeDir, ".claude", "todos")
 	leadLogPath, _ := parser.FindLeadSessionLogFile(projectsDir, team.LeadSessionID)
 
 	for i := range team.Members {
 		agent := &team.Members[i]
 
 		// Find agent's log file by member identity first, then cwd fallback
-		logPath, agentID, err := parser.FindAgentLogFileForMember(projectsDir, team.LeadSessionID, agent.Name, agent.Cwd, agent.JoinedAt)
+		logPath, agentID, sessionID, err := parser.FindAgentLogFileForMember(projectsDir, team.LeadSessionID, agent.Name, agent.Cwd, agent.JoinedAt)
 		if err != nil || logPath == "" || agentID == "" {
 			continue
 		}
@@ -192,6 +194,27 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 			agent.LastActiveTime = activity.LastActiveTime
 		}
 
+		// Load TodoWrite items for this agent
+		if sessionID != "" {
+			todos, err := parser.LoadTodosForSession(todosDir, sessionID)
+			if err != nil {
+				log.Printf("Error loading todos for %s (session %s): %v", agent.Name, sessionID, err)
+			}
+			if len(todos) == 0 {
+				// Fallback: extract from JSONL log
+				todos, _ = parser.ExtractTodosFromLog(logPath)
+			}
+			if len(todos) > 0 {
+				agent.Todos = todos
+			}
+		} else {
+			// No session ID, try extracting directly from log
+			todos, _ := parser.ExtractTodosFromLog(logPath)
+			if len(todos) > 0 {
+				agent.Todos = todos
+			}
+		}
+
 		// For team-lead, prefer lead session root log when more recent.
 		if agent.Name == "team-lead" && leadLogPath != "" {
 			leadActivity, err := parser.ParseAgentActivity(leadLogPath)
@@ -201,6 +224,16 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 					agent.LastToolUse = leadActivity.LastToolUse
 					agent.LastToolDetail = leadActivity.LastToolDetail
 					agent.LastActiveTime = leadActivity.LastActiveTime
+				}
+			}
+			// Also try loading todos from lead session
+			if len(agent.Todos) == 0 && team.LeadSessionID != "" {
+				todos, _ := parser.LoadTodosForSession(todosDir, team.LeadSessionID)
+				if len(todos) == 0 && leadLogPath != "" {
+					todos, _ = parser.ExtractTodosFromLog(leadLogPath)
+				}
+				if len(todos) > 0 {
+					agent.Todos = todos
 				}
 			}
 		}

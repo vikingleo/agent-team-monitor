@@ -35,13 +35,6 @@ func ParseTaskFile(taskPath string) (*types.TaskInfo, error) {
 		return nil, err
 	}
 
-	// Skip internal tasks
-	if task.Metadata != nil {
-		if internal, ok := task.Metadata["_internal"].(bool); ok && internal {
-			return nil, nil
-		}
-	}
-
 	// Parse timestamps
 	createdAt := time.Now()
 	if task.CreatedAt != "" {
@@ -70,16 +63,6 @@ func ParseTaskFile(taskPath string) (*types.TaskInfo, error) {
 
 // ScanTasks scans the tasks directory for a specific team
 func ScanTasks(tasksDir, teamName string) ([]types.TaskInfo, error) {
-	return scanTasksInternal(tasksDir, teamName, true)
-}
-
-// ScanAllTasks scans all tasks including internal ones
-func ScanAllTasks(tasksDir, teamName string) ([]types.TaskInfo, error) {
-	return scanTasksInternal(tasksDir, teamName, false)
-}
-
-// scanTasksInternal is the internal implementation
-func scanTasksInternal(tasksDir, teamName string, skipInternal bool) ([]types.TaskInfo, error) {
 	var tasks []types.TaskInfo
 
 	teamTasksDir := filepath.Join(tasksDir, teamName)
@@ -101,56 +84,16 @@ func scanTasksInternal(tasksDir, teamName string, skipInternal bool) ([]types.Ta
 		if err != nil {
 			continue
 		}
-		// Skip if task is nil (internal task) and skipInternal is true
 		if task != nil {
 			tasks = append(tasks, *task)
-		} else if !skipInternal {
-			// Re-parse without filtering for internal tasks
-			task, err = parseTaskFileNoFilter(taskPath)
-			if err == nil && task != nil {
-				tasks = append(tasks, *task)
-			}
 		}
 	}
 
 	return tasks, nil
 }
 
-// parseTaskFileNoFilter parses task file without filtering internal tasks
-func parseTaskFileNoFilter(taskPath string) (*types.TaskInfo, error) {
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var task TaskFile
-	if err := json.Unmarshal(data, &task); err != nil {
-		return nil, err
-	}
-
-	// Parse timestamps
-	createdAt := time.Now()
-	if task.CreatedAt != "" {
-		if t, err := time.Parse(time.RFC3339, task.CreatedAt); err == nil {
-			createdAt = t
-		}
-	}
-
-	updatedAt := createdAt
-	if task.UpdatedAt != "" {
-		if t, err := time.Parse(time.RFC3339, task.UpdatedAt); err == nil {
-			updatedAt = t
-		}
-	}
-
-	return &types.TaskInfo{
-		ID:          task.ID,
-		Subject:     task.Subject,
-		Description: task.Description,
-		Status:      task.Status,
-		Owner:       task.Owner,
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
-	}, nil
+// ScanAllTasks scans all tasks (kept for API compatibility)
+func ScanAllTasks(tasksDir, teamName string) ([]types.TaskInfo, error) {
+	return ScanTasks(tasksDir, teamName)
 }
 

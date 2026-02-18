@@ -32,6 +32,15 @@ type AgentInfo struct {
 	LastToolUse    string    `json:"last_tool_use,omitempty"`    // Latest tool name (Read, Edit, Bash, etc.)
 	LastToolDetail string    `json:"last_tool_detail,omitempty"` // Tool usage details
 	LastActiveTime time.Time `json:"last_active_time,omitempty"` // Last activity timestamp from logs
+	// TodoWrite items from ~/.claude/todos/
+	Todos []TodoItem `json:"todos,omitempty"`
+}
+
+// TodoItem represents a single todo item from TodoWrite
+type TodoItem struct {
+	Content    string `json:"content"`
+	Status     string `json:"status"`      // pending, in_progress, completed
+	ActiveForm string `json:"active_form"` // Short display label
 }
 
 // TaskInfo represents a task in the task list

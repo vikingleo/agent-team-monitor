@@ -185,13 +185,8 @@ function renderTeam(team) {
 
             <div class="team-section office-scene">
                 <h3>🏢 办公区实况 (${members.length} 位同事, ${workingCount} 位忙碌中)</h3>
-                <p class="office-hint">每位成员用“人话”同步当前状态、思路和工具动作。</p>
+                <p class="office-hint">每位成员用"人话"同步当前状态、思路和工具动作。</p>
                 ${renderAgentsWithTasks(members, tasks)}
-            </div>
-
-            <div class="team-section">
-                <h3>📋 任务总览 (${tasks.length} 项)</h3>
-                ${tasks.length > 0 ? renderAgentTaskList(tasks) : '<p class="empty-state">暂无任务</p>'}
             </div>
         </div>
     `;
@@ -426,7 +421,7 @@ function renderAgentWithTasks(agent, tasks) {
                 ${dialogues.map((dialogue, index) => `<div class="agent-bubble ${index === 0 ? 'primary' : 'secondary'}">${escapeHtml(dialogue)}</div>`).join('')}
             </div>
             ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
-            ${tasks.length > 0 ? `<div class="agent-tasks"><div class="task-list-title">我手上的任务</div>${renderAgentTaskList(tasks)}</div>` : ''}
+            ${agent.todos && agent.todos.length > 0 ? renderAgentTodos(agent.todos) : ''}
         </div>
     `;
 }
@@ -446,6 +441,36 @@ function renderAgentTaskList(tasks) {
                     </div>
                 `;
             }).join('')}
+        </div>
+    `;
+}
+
+// Render todo list for an agent
+function renderAgentTodos(todos) {
+    const todoStatusIcon = (status) => {
+        switch (status) {
+            case 'in_progress': return '🔄';
+            case 'completed': return '✅';
+            default: return '⬜';
+        }
+    };
+
+    return `
+        <div class="agent-todos">
+            <div class="task-list-title">📝 待办清单</div>
+            <div class="todo-list-compact">
+                ${todos.map(todo => {
+                    const icon = todoStatusIcon(todo.status);
+                    const label = todo.status === 'in_progress' && todo.active_form ? todo.active_form : todo.content;
+                    const statusClass = todo.status.toLowerCase().replace('_', '-');
+                    return `
+                        <div class="todo-item-compact ${statusClass}">
+                            <span class="todo-icon">${icon}</span>
+                            <span class="todo-content">${escapeHtml(label)}</span>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
         </div>
     `;
 }

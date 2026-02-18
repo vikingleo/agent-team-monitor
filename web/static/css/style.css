@@ -502,6 +502,47 @@ main {
     white-space: nowrap;
 }
 
+/* Agent todo list */
+.agent-todos {
+    margin-top: 6px;
+}
+
+.todo-list-compact {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.todo-item-compact {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    padding: 2px 0;
+}
+
+.todo-item-compact .todo-icon {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
+
+.todo-item-compact .todo-content {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.todo-item-compact.completed .todo-content {
+    color: var(--text-muted);
+    text-decoration: line-through;
+}
+
+.todo-item-compact.in-progress .todo-content {
+    color: var(--working-color);
+}
+
 /* Unassigned tasks styling */
 .agent-item.unassigned {
     background: rgba(255, 165, 0, 0.1);

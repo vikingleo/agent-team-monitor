@@ -219,31 +219,6 @@ func (m model) renderTeam(team types.TeamInfo) string {
 		b.WriteString(m.renderBroadcastDesk(unassignedTasks))
 	}
 
-	b.WriteString("\n")
-	b.WriteString(officeSectionStyle.Render(fmt.Sprintf("📋 任务总览 (%d 项)", len(team.Tasks))))
-	b.WriteString("\n")
-
-	if len(team.Tasks) == 0 {
-		b.WriteString(taskOverviewStyle.Render("  暂无任务"))
-		b.WriteString("\n")
-	} else {
-		for _, task := range team.Tasks {
-			owner := task.Owner
-			if owner == "" {
-				owner = "未分配"
-			}
-			statusStr := m.formatTaskStatus(task.Status)
-			taskLine := fmt.Sprintf("  #%s %s %s · 负责人: %s",
-				task.ID,
-				statusStr,
-				narrative.NormalizeDialogText(task.Subject, 40),
-				owner,
-			)
-			b.WriteString(taskOverviewStyle.Render(taskLine))
-			b.WriteString("\n")
-		}
-	}
-
 	return b.String()
 }
 
@@ -277,17 +252,25 @@ func (m model) renderAgentDesk(agent types.AgentInfo, tasks []types.TaskInfo) st
 		b.WriteString("\n")
 	}
 
-	if len(tasks) > 0 {
-		b.WriteString(taskTitleStyle.Render("我手上的任务"))
+	if len(agent.Todos) > 0 {
+		b.WriteString(taskTitleStyle.Render("📝 待办清单"))
 		b.WriteString("\n")
-		for _, task := range tasks {
-			statusStr := m.formatTaskStatus(task.Status)
-			taskLine := fmt.Sprintf("    %s %s %s",
-				task.ID,
-				statusStr,
-				narrative.NormalizeDialogText(task.Subject, 46),
-			)
-			b.WriteString(taskStyle.Render(taskLine))
+		for _, todo := range agent.Todos {
+			icon := "  "
+			switch todo.Status {
+			case "in_progress":
+				icon = "🔄"
+			case "completed":
+				icon = "✅"
+			default:
+				icon = "⬜"
+			}
+			label := todo.Content
+			if todo.ActiveForm != "" && todo.Status == "in_progress" {
+				label = todo.ActiveForm
+			}
+			todoLine := fmt.Sprintf("    %s %s", icon, narrative.NormalizeDialogText(label, 46))
+			b.WriteString(taskStyle.Render(todoLine))
 			b.WriteString("\n")
 		}
 	}

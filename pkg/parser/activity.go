@@ -285,18 +285,19 @@ func FindAgentLogFileByCwd(projectsDir, cwd string) (string, string, error) {
 // 2) Match logs whose text content includes "你是 {memberName}" or "You are {memberName}".
 // 3) Fallback to cwd match if no member-text match found.
 // 4) Pick the most recently active candidate.
-func FindAgentLogFileForMember(projectsDir, leadSessionID, memberName, cwd string, joinedAt time.Time) (string, string, error) {
+// Returns logFilePath, agentID, sessionID, error
+func FindAgentLogFileForMember(projectsDir, leadSessionID, memberName, cwd string, joinedAt time.Time) (string, string, string, error) {
 	if projectsDir == "" || memberName == "" {
-		return "", "", nil
+		return "", "", "", nil
 	}
 
 	aliases := memberAliases(memberName)
 	candidates, err := findMemberLogCandidates(projectsDir, leadSessionID, aliases, cwd, joinedAt)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if len(candidates) == 0 {
-		return "", "", nil
+		return "", "", "", nil
 	}
 
 	sort.SliceStable(candidates, func(i, j int) bool {
@@ -314,7 +315,7 @@ func FindAgentLogFileForMember(projectsDir, leadSessionID, memberName, cwd strin
 		return candidates[i].LastActiveAt.After(candidates[j].LastActiveAt)
 	})
 
-	return candidates[0].Path, candidates[0].AgentID, nil
+	return candidates[0].Path, candidates[0].AgentID, candidates[0].SessionID, nil
 }
 
 func findMemberLogCandidates(projectsDir, leadSessionID string, memberAliases []string, cwd string, joinedAt time.Time) ([]AgentLogCandidate, error) {
