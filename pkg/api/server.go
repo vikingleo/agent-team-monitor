@@ -28,6 +28,7 @@ func NewServer(collector *monitor.Collector, addr string, staticFS fs.FS) *Serve
 	// API endpoints
 	mux.HandleFunc("/api/state", s.handleGetState)
 	mux.HandleFunc("/api/teams", s.handleGetTeams)
+	mux.HandleFunc("/api/teams/", s.handleTeamAction)
 	mux.HandleFunc("/api/processes", s.handleGetProcesses)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
@@ -96,6 +97,30 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTeamAction handles per-team actions (DELETE /api/teams/{name})
+func (s *Server) handleTeamAction(w http.ResponseWriter, r *http.Request) {
+	teamName := strings.TrimPrefix(r.URL.Path, "/api/teams/")
+	if teamName == "" {
+		http.Error(w, "Team name required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.collector.DeleteTeam(teamName); err != nil {
+			log.Printf("Error deleting team %s: %v", teamName, err)
+			http.Error(w, "Failed to delete team", http.StatusInternalServerError)
+			return
+		}
+		respondJSON(w, map[string]interface{}{
+			"status":  "ok",
+			"message": "Team deleted",
+		})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // respondJSON writes a JSON response
 func respondJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -113,7 +138,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {

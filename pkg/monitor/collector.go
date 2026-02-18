@@ -143,7 +143,7 @@ func (c *Collector) updateState() {
 	}
 
 	// Update state
-	c.state.Teams = teams
+	c.state.Teams = filterStaleTeams(teams, 30*time.Minute)
 	c.state.Processes = processes
 	c.state.UpdatedAt = time.Now()
 }
@@ -316,6 +316,32 @@ func (c *Collector) GetState() types.MonitorState {
 	return *c.state
 }
 
+// DeleteTeam removes a team's config and task directories.
+func (c *Collector) DeleteTeam(teamName string) error {
+	homeDir, _ := os.UserHomeDir()
+	teamsDir := filepath.Join(homeDir, ".claude", "teams", teamName)
+	tasksDir := filepath.Join(homeDir, ".claude", "tasks", teamName)
+
+	// Remove team config directory
+	if err := os.RemoveAll(teamsDir); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// Remove task directory
+	if err := os.RemoveAll(tasksDir); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	log.Printf("Deleted team %q (removed teams and tasks directories)", teamName)
+
+	// Trigger state refresh
+	select {
+	case c.updateChan <- struct{}{}:
+	default:
+	}
+
+	return nil
+}
+
 // Stop stops the collector
 func (c *Collector) Stop() error {
 	var err error
@@ -324,4 +350,46 @@ func (c *Collector) Stop() error {
 		err = c.fsMonitor.Stop()
 	})
 	return err
+}
+
+// filterStaleTeams removes teams where all members have been inactive
+// longer than the given threshold.
+func filterStaleTeams(teams []types.TeamInfo, threshold time.Duration) []types.TeamInfo {
+	now := time.Now()
+	result := make([]types.TeamInfo, 0, len(teams))
+
+	for _, team := range teams {
+		if isTeamActive(team, now, threshold) {
+			result = append(result, team)
+		} else {
+			log.Printf("Hiding stale team %q (no activity for %v)", team.Name, threshold)
+		}
+	}
+
+	return result
+}
+
+// isTeamActive returns true if any member in the team has recent activity.
+func isTeamActive(team types.TeamInfo, now time.Time, threshold time.Duration) bool {
+	if len(team.Members) == 0 {
+		// No members — check if team was created recently
+		return now.Sub(team.CreatedAt) < threshold
+	}
+
+	for _, agent := range team.Members {
+		// Check all available timestamps for recent activity
+		timestamps := []time.Time{
+			agent.LastActiveTime,
+			agent.LastMessageTime,
+			agent.LastActivity,
+			agent.JoinedAt,
+		}
+		for _, ts := range timestamps {
+			if !ts.IsZero() && now.Sub(ts) < threshold {
+				return true
+			}
+		}
+	}
+
+	return false
 }

@@ -155,9 +155,12 @@ function renderProcess(process) {
 // Update teams section
 function updateTeams(teams) {
     const container = document.getElementById('teams-container');
+    const nav = document.getElementById('team-nav');
 
     if (teams.length === 0) {
         container.innerHTML = '<p class="empty-state">未找到活动团队</p>';
+        nav.innerHTML = '';
+        nav.style.display = 'none';
         return;
     }
 
@@ -167,7 +170,71 @@ function updateTeams(teams) {
         </div>
     `;
     container.innerHTML = html;
+
+    // Render team nav (only show when more than 1 team)
+    if (teams.length > 1) {
+        nav.style.display = '';
+        nav.innerHTML = teams.map(team => {
+            const teamId = `team-${encodeURIComponent(team.name)}`;
+            return `<a class="team-nav-item" data-team-id="${teamId}" title="${escapeHtml(team.name)}">${escapeHtml(team.name)}</a>`;
+        }).join('');
+
+        // Bind click handlers
+        nav.querySelectorAll('.team-nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const targetId = item.getAttribute('data-team-id');
+                const target = document.getElementById(targetId);
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+
+        updateTeamNavActive();
+    } else {
+        nav.style.display = 'none';
+        nav.innerHTML = '';
+    }
 }
+
+// Highlight the team nav item closest to viewport top
+function updateTeamNavActive() {
+    const nav = document.getElementById('team-nav');
+    if (!nav || nav.style.display === 'none') return;
+
+    const items = nav.querySelectorAll('.team-nav-item');
+    if (items.length === 0) return;
+
+    let activeId = null;
+    let minDistance = Infinity;
+
+    items.forEach(item => {
+        const teamId = item.getAttribute('data-team-id');
+        const el = document.getElementById(teamId);
+        if (el) {
+            const rect = el.getBoundingClientRect();
+            const distance = Math.abs(rect.top);
+            if (distance < minDistance) {
+                minDistance = distance;
+                activeId = teamId;
+            }
+        }
+    });
+
+    items.forEach(item => {
+        item.classList.toggle('active', item.getAttribute('data-team-id') === activeId);
+    });
+}
+
+// Listen for scroll to update active team nav
+let scrollRAF = null;
+window.addEventListener('scroll', () => {
+    if (scrollRAF) return;
+    scrollRAF = requestAnimationFrame(() => {
+        updateTeamNavActive();
+        scrollRAF = null;
+    });
+}, { passive: true });
 
 // Render a single team
 function renderTeam(team) {
@@ -175,12 +242,16 @@ function renderTeam(team) {
     const members = team.members || [];
     const tasks = team.tasks || [];
     const workingCount = members.filter(member => member.status === 'working').length;
+    const teamId = `team-${encodeURIComponent(team.name)}`;
 
     return `
-        <div class="team-card">
+        <div class="team-card" id="${teamId}">
             <div class="team-header">
-                <div class="team-name">${escapeHtml(team.name)}</div>
-                <div class="team-created">创建时间: ${createdDate}</div>
+                <div class="team-header-left">
+                    <div class="team-name">${escapeHtml(team.name)}</div>
+                    <div class="team-created">创建时间: ${createdDate}</div>
+                </div>
+                <button class="team-delete-btn" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队">🗑️ 清理</button>
             </div>
 
             <div class="team-section office-scene">
@@ -190,6 +261,26 @@ function renderTeam(team) {
             </div>
         </div>
     `;
+}
+
+// Delete a team
+async function deleteTeam(teamName) {
+    if (!confirm(`确定要清理团队「${teamName}」吗？\n\n这将删除该团队的配置和任务数据。`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_ENDPOINTS.teams}/${encodeURIComponent(teamName)}`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        fetchData();
+    } catch (error) {
+        console.error('Error deleting team:', error);
+        alert(`清理团队失败: ${error.message}`);
+    }
 }
 
 function groupTasksByOwner(agents, tasks) {
