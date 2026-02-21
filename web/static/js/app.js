@@ -113,10 +113,10 @@ function updateConnectionStatus(connected) {
     if (connected !== isConnected) {
         isConnected = connected;
         if (connected) {
-            statusEl.textContent = '● 已连接';
+            statusEl.innerHTML = '<span class="status-dot"></span> 已连接';
             statusEl.className = 'status-indicator connected';
         } else {
-            statusEl.textContent = '● 已断开';
+            statusEl.innerHTML = '<span class="status-dot"></span> 已断开';
             statusEl.className = 'status-indicator disconnected';
         }
     }
@@ -251,11 +251,11 @@ function renderTeam(team) {
                     <div class="team-name">${escapeHtml(team.name)}</div>
                     <div class="team-created">创建时间: ${createdDate}</div>
                 </div>
-                <button class="team-delete-btn" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队">🗑️ 清理</button>
+                <button class="team-delete-btn" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg> 清理</button>
             </div>
 
             <div class="team-section office-scene">
-                <h3>🏢 办公区实况 (${members.length} 位同事, ${workingCount} 位忙碌中)</h3>
+                <h3><span class="section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></span> 办公区实况 (${members.length} 位同事, ${workingCount} 位忙碌中)</h3>
                 <p class="office-hint">每位成员用"人话"同步当前状态、思路和工具动作。</p>
                 ${renderAgentsWithTasks(members, tasks)}
             </div>
@@ -324,30 +324,11 @@ function renderAgentsWithTasks(agents, tasks) {
     `;
 }
 
-function getRoleEmoji(agent) {
-    if (agent.role_emoji) {
-        return agent.role_emoji;
-    }
-
-    const normalizedName = (agent.name || '').toLowerCase();
-
-    if (normalizedName.includes('lead')) {
-        return '🧑‍💼';
-    }
-    if (normalizedName.includes('api')) {
-        return '👨‍💻';
-    }
-    if (normalizedName.includes('admin')) {
-        return '🧑‍🔧';
-    }
-    if (normalizedName.includes('vue')) {
-        return '🧑‍🎨';
-    }
-    if (normalizedName.includes('uniapp')) {
-        return '🧑‍📱';
-    }
-
-    return '🧑';
+function getRoleIcon(agent) {
+    const name = (agent.name || '').toLowerCase();
+    // Return first letter uppercase as text initial
+    const initial = (agent.name || 'A').charAt(0).toUpperCase();
+    return initial;
 }
 
 function normalizeDialogText(text, maxLength = 90) {
@@ -429,15 +410,15 @@ function isAgentInMotion(agent) {
 
 function getAgentMotionLabel(agent, moving) {
     if (moving) {
-        return '⚡ 正在活动';
+        return '● 正在活动';
     }
 
     const lastActiveText = formatRelativeTime(agent.last_active_time);
     if (lastActiveText) {
-        return `○ 最近动作 ${lastActiveText}`;
+        return `○ ${lastActiveText}`;
     }
 
-    return '○ 工位待命';
+    return '○ 待命';
 }
 
 function buildAgentDialogues(agent, tasks) {
@@ -494,7 +475,7 @@ function renderAgentWithTasks(agent, tasks) {
     const statusClass = agent.status.toLowerCase();
     const statusText = formatAgentStatus(agent.status);
     const dialogues = buildAgentDialogues(agent, tasks);
-    const roleEmoji = getRoleEmoji(agent);
+    const roleEmoji = getRoleIcon(agent);
     const moving = isAgentInMotion(agent);
     const motionClass = moving ? 'active-motion' : 'idle-motion';
     const motionLabel = getAgentMotionLabel(agent, moving);
@@ -511,7 +492,7 @@ function renderAgentWithTasks(agent, tasks) {
             <div class="agent-dialogues">
                 ${dialogues.map((dialogue, index) => `<div class="agent-bubble ${index === 0 ? 'primary' : 'secondary'}">${escapeHtml(dialogue)}</div>`).join('')}
             </div>
-            ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
+            ${agent.cwd ? `<div class="agent-cwd">${escapeHtml(agent.cwd)}</div>` : ''}
             ${agent.todos && agent.todos.length > 0 ? renderAgentTodos(agent.todos) : ''}
         </div>
     `;
@@ -540,15 +521,15 @@ function renderAgentTaskList(tasks) {
 function renderAgentTodos(todos) {
     const todoStatusIcon = (status) => {
         switch (status) {
-            case 'in_progress': return '🔄';
-            case 'completed': return '✅';
-            default: return '⬜';
+            case 'in_progress': return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+            case 'completed': return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
+            default: return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#63636e" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/></svg>';
         }
     };
 
     return `
         <div class="agent-todos">
-            <div class="task-list-title">📝 待办清单</div>
+            <div class="task-list-title">待办清单</div>
             <div class="todo-list-compact">
                 ${todos.map(todo => {
                     const icon = todoStatusIcon(todo.status);
@@ -571,7 +552,7 @@ function renderUnassignedTasks(tasks) {
     return `
         <div class="agent-item unassigned office-broadcast">
             <div class="agent-header">
-                <span class="agent-avatar" aria-hidden="true">📣</span>
+                <span class="agent-avatar" aria-hidden="true">!</span>
                 <span class="agent-name">前台广播</span>
                 <span class="agent-type">[${tasks.length} 条待认领任务]</span>
             </div>
@@ -608,7 +589,7 @@ function renderAgent(agent) {
                 <span class="agent-type">[${escapeHtml(agent.agent_type)}]</span>
                 <span class="agent-status ${statusClass}">${statusText}</span>
             </div>
-            ${agent.cwd ? `<div class="agent-cwd">📁 ${escapeHtml(agent.cwd)}</div>` : ''}
+            ${agent.cwd ? `<div class="agent-cwd">${escapeHtml(agent.cwd)}</div>` : ''}
             ${agent.current_task ? `<div class="agent-task">任务: ${escapeHtml(agent.current_task)}</div>` : ''}
         </div>
     `;

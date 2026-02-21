@@ -9,32 +9,36 @@
 <body>
     <div class="container">
         <header>
-            <h1>🤖 Claude Agent Team 监控器</h1>
+            <h1>
+                <span class="header-logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                </span>
+                Agent Team Monitor
+            </h1>
             <div class="header-info">
                 <span id="last-update">最后更新: --:--:--</span>
-                <span class="status-indicator" id="connection-status">● 已连接</span>
+                <span class="status-indicator" id="connection-status"><span class="status-dot"></span> 已连接</span>
             </div>
         </header>
 
         <main>
-            <!-- Tabs Navigation -->
             <div class="tabs">
                 <button class="tab-button active" data-tab="teams">
-                    👥 活动团队 <span id="teams-count" class="badge">0</span>
+                    <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+                    活动团队 <span id="teams-count" class="badge">0</span>
                 </button>
                 <button class="tab-button" data-tab="processes">
-                    📊 进程 <span id="processes-count" class="badge">0</span>
+                    <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
+                    进程 <span id="processes-count" class="badge">0</span>
                 </button>
             </div>
 
-            <!-- Teams Tab (Default) -->
             <div id="teams-tab" class="tab-content active">
                 <div id="teams-container">
                     <p class="loading">加载中...</p>
                 </div>
             </div>
 
-            <!-- Processes Tab (Hidden by default) -->
             <div id="processes-tab" class="tab-content">
                 <div id="processes-container">
                     <p class="loading">加载中...</p>
