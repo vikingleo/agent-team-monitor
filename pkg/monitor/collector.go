@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 )
 
 var sessionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var windowsAbsPathPattern = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+var exposeAbsolutePaths = readExposeAbsolutePaths()
 
 // Collector collects and aggregates monitoring data
 type Collector struct {
@@ -421,8 +425,90 @@ func (c *Collector) GetState() types.MonitorState {
 	c.stateMutex.RLock()
 	defer c.stateMutex.RUnlock()
 
-	// Return a copy of the state
-	return *c.state
+	stateCopy := types.MonitorState{
+		UpdatedAt: c.state.UpdatedAt,
+		Processes: append([]types.ProcessInfo(nil), c.state.Processes...),
+		Teams:     make([]types.TeamInfo, len(c.state.Teams)),
+	}
+
+	for i, team := range c.state.Teams {
+		teamCopy := team
+		teamCopy.Tasks = append([]types.TaskInfo(nil), team.Tasks...)
+		teamCopy.Members = append([]types.AgentInfo(nil), team.Members...)
+
+		for j, member := range teamCopy.Members {
+			member.OfficeDialogues = append([]string(nil), member.OfficeDialogues...)
+			member.Todos = append([]types.TodoItem(nil), member.Todos...)
+
+			if !exposeAbsolutePaths {
+				member.Cwd = sanitizeDisplayPath(member.Cwd)
+			}
+			teamCopy.Members[j] = member
+		}
+
+		if !exposeAbsolutePaths {
+			teamCopy.ProjectCwd = sanitizeDisplayPath(teamCopy.ProjectCwd)
+		}
+
+		stateCopy.Teams[i] = teamCopy
+	}
+
+	return stateCopy
+}
+
+func readExposeAbsolutePaths() bool {
+	raw := strings.TrimSpace(os.Getenv("ATM_EXPOSE_ABS_PATHS"))
+	if raw == "" {
+		return false
+	}
+
+	enabled, err := strconv.ParseBool(raw)
+	if err == nil {
+		return enabled
+	}
+
+	switch strings.ToLower(raw) {
+	case "on", "yes", "y":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeDisplayPath(raw string) string {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return ""
+	}
+
+	cleaned := filepath.Clean(path)
+
+	homeDir, err := os.UserHomeDir()
+	if err == nil && homeDir != "" {
+		homeDir = filepath.Clean(homeDir)
+		if cleaned == homeDir {
+			return "~"
+		}
+		homePrefix := homeDir + string(os.PathSeparator)
+		if strings.HasPrefix(cleaned, homePrefix) {
+			return "~" + cleaned[len(homeDir):]
+		}
+	}
+
+	// For non-home absolute paths, keep only project/folder name.
+	if filepath.IsAbs(cleaned) {
+		return filepath.Base(cleaned)
+	}
+	if windowsAbsPathPattern.MatchString(cleaned) {
+		replaced := strings.ReplaceAll(cleaned, "\\", "/")
+		replaced = strings.TrimSuffix(replaced, "/")
+		parts := strings.Split(replaced, "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+
+	return cleaned
 }
 
 // DeleteTeam removes a team's config and task directories.
