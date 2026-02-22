@@ -16,7 +16,7 @@ set -euo pipefail
 APP_NAME="agent-team-monitor"
 BUILD_DIR="bin"
 ENTRY="./cmd/monitor"
-GH_REMOTE="${GH_REMOTE:-vikingleo}"
+GH_REMOTE="${GH_REMOTE:-}"
 GH_REPO="${GH_REPO:-vikingleo/agent-team-monitor}"
 
 # 目标平台
@@ -28,6 +28,43 @@ PLATFORMS=(
   "windows/amd64"
   "windows/arm64"
 )
+
+resolve_git_remote() {
+  # User explicitly set GH_REMOTE
+  if [[ -n "${GH_REMOTE}" ]]; then
+    if git remote get-url "${GH_REMOTE}" >/dev/null 2>&1; then
+      return
+    fi
+    echo "错误: 指定的 GH_REMOTE 不存在: ${GH_REMOTE}"
+    echo "可用远程仓库:"
+    git remote -v || true
+    exit 1
+  fi
+
+  # Prefer current branch upstream remote
+  local upstream
+  upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" 2>/dev/null || true)
+  if [[ -n "${upstream}" ]]; then
+    GH_REMOTE="${upstream%%/*}"
+  fi
+
+  # Fallback to origin
+  if [[ -z "${GH_REMOTE}" ]] && git remote get-url origin >/dev/null 2>&1; then
+    GH_REMOTE="origin"
+  fi
+
+  # Last fallback: first available remote
+  if [[ -z "${GH_REMOTE}" ]]; then
+    GH_REMOTE=$(git remote | head -n 1 || true)
+  fi
+
+  if [[ -z "${GH_REMOTE}" ]]; then
+    echo "错误: 未找到可用的 git remote，请先执行 git remote add"
+    exit 1
+  fi
+}
+
+resolve_git_remote
 
 # ---- 版本号 ----
 if [[ $# -ge 1 ]]; then
