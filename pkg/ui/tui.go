@@ -189,6 +189,10 @@ func (m model) renderTeam(team types.TeamInfo) string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("团队: %s", team.Name)))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("创建时间: %s", team.CreatedAt.Format("2006-01-02 15:04"))))
+	if team.ProjectCwd != "" {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("工作目录: %s", team.ProjectCwd)))
+	}
 	b.WriteString("\n\n")
 
 	workingCount := 0

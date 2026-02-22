@@ -62,7 +62,12 @@ function stopAutoRefresh() {
 // Fetch data from API
 async function fetchData() {
     try {
-        const response = await fetch(API_ENDPOINTS.state);
+        const response = await fetch(`${API_ENDPOINTS.state}?_ts=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
+        });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -145,9 +150,10 @@ function renderProcess(process) {
     return `
         <div class="process-item">
             <div class="process-info">
-                <span class="process-pid">进程 ID: ${process.pid}</span>
-                <span class="process-uptime">运行时间: ${uptime}</span>
+                <span class="process-pid">PID ${process.pid}</span>
+                <span class="process-uptime">${uptime}</span>
             </div>
+            ${process.command ? `<div class="process-cmd">${escapeHtml(process.command)}</div>` : ''}
         </div>
     `;
 }
@@ -158,7 +164,7 @@ function updateTeams(teams) {
     const nav = document.getElementById('team-nav');
 
     if (teams.length === 0) {
-        container.innerHTML = '<p class="empty-state">未找到活动团队</p>';
+        container.innerHTML = '<p class="empty-state"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>未找到活动团队</p>';
         nav.innerHTML = '';
         nav.style.display = 'none';
         return;
@@ -239,6 +245,7 @@ window.addEventListener('scroll', () => {
 // Render a single team
 function renderTeam(team) {
     const createdDate = new Date(team.created_at).toLocaleString('zh-CN');
+    const projectCwd = team.project_cwd || '';
     const members = team.members || [];
     const tasks = team.tasks || [];
     const workingCount = members.filter(member => member.status === 'working').length;
@@ -250,6 +257,7 @@ function renderTeam(team) {
                 <div class="team-header-left">
                     <div class="team-name">${escapeHtml(team.name)}</div>
                     <div class="team-created">创建时间: ${createdDate}</div>
+                    ${projectCwd ? `<div class="team-cwd">工作目录: ${escapeHtml(projectCwd)}</div>` : ''}
                 </div>
                 <button class="team-delete-btn" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg> 清理</button>
             </div>
@@ -311,6 +319,13 @@ function groupTasksByOwner(agents, tasks) {
 // Render agents with their tasks
 function renderAgentsWithTasks(agents, tasks) {
     if (agents.length === 0) {
+        if (tasks.length > 0) {
+            return `
+                <div class="agent-list office-floor">
+                    ${renderUnassignedTasks(tasks)}
+                </div>
+            `;
+        }
         return '<p class="empty-state">无成员</p>';
     }
 

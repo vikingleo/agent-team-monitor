@@ -260,8 +260,21 @@ header h1 {
 .empty-state {
     text-align: center;
     color: var(--text-muted);
-    padding: 32px 16px;
+    padding: 48px 16px;
     font-size: 0.85rem;
+}
+
+.empty-state svg {
+    display: block;
+    margin: 0 auto 10px;
+    opacity: 0.3;
+}
+
+.header-subtitle {
+    font-size: 0.55em;
+    opacity: 0.6;
+    margin-left: 8px;
+    font-weight: 400;
 }
 
 /* ---- Processes ---- */
@@ -301,6 +314,17 @@ header h1 {
 .process-uptime {
     color: var(--text-muted);
     white-space: nowrap;
+}
+
+.process-cmd {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
 }
 
 /* ---- Teams ---- */
@@ -422,6 +446,13 @@ header h1 {
 .team-created {
     color: var(--text-muted);
     font-size: 0.72rem;
+}
+
+.team-cwd {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    margin-top: 3px;
+    word-break: break-all;
 }
 
 .team-section {
@@ -903,6 +934,10 @@ footer a:hover {
 
     header h1 {
         font-size: 1rem;
+    }
+
+    .header-subtitle {
+        display: none;
     }
 
     .header-info {

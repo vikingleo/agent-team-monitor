@@ -35,8 +35,9 @@ func ParseTaskFile(taskPath string) (*types.TaskInfo, error) {
 		return nil, err
 	}
 
-	// Parse timestamps
-	createdAt := time.Now()
+	// Parse timestamps; fall back to file modtime instead of time.Now()
+	// so that orphaned task files without timestamps age correctly.
+	createdAt := fileModTime(taskPath)
 	if task.CreatedAt != "" {
 		if t, err := time.Parse(time.RFC3339, task.CreatedAt); err == nil {
 			createdAt = t
@@ -90,6 +91,13 @@ func ScanTasks(tasksDir, teamName string) ([]types.TaskInfo, error) {
 	}
 
 	return tasks, nil
+}
+
+func fileModTime(path string) time.Time {
+	if info, err := os.Stat(path); err == nil {
+		return info.ModTime()
+	}
+	return time.Now()
 }
 
 // ScanAllTasks scans all tasks (kept for API compatibility)

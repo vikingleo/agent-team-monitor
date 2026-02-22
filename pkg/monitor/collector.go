@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/liaoweijun/agent-team-monitor/pkg/parser"
 	"github.com/liaoweijun/agent-team-monitor/pkg/types"
 )
+
+var sessionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // Collector collects and aggregates monitoring data
 type Collector struct {
@@ -111,6 +114,7 @@ func (c *Collector) updateState() {
 		log.Printf("Error scanning teams: %v", err)
 		teams = []types.TeamInfo{}
 	}
+	teams = mergeTaskOnlyTeams(teams, tasksDir)
 
 	// Load tasks for each team
 	for i := range teams {
@@ -121,6 +125,8 @@ func (c *Collector) updateState() {
 			continue
 		}
 		teams[i].Tasks = tasks
+		c.updateVirtualTeamTimestamp(&teams[i], tasks)
+		c.populateTeamProjectCwd(&teams[i], projectsDir)
 
 		// Load all tasks (including internal) for status calculation
 		allTasks, err := parser.ScanAllTasks(tasksDir, teams[i].Name)
@@ -143,9 +149,112 @@ func (c *Collector) updateState() {
 	}
 
 	// Update state
-	c.state.Teams = filterStaleTeams(teams, 30*time.Minute)
+	c.state.Teams = filterStaleTeams(teams, 30*time.Minute, tasksDir)
 	c.state.Processes = processes
 	c.state.UpdatedAt = time.Now()
+}
+
+// mergeTaskOnlyTeams creates virtual teams for task directories that have no team config.
+func mergeTaskOnlyTeams(teams []types.TeamInfo, tasksDir string) []types.TeamInfo {
+	existing := make(map[string]struct{}, len(teams))
+	for _, team := range teams {
+		existing[team.Name] = struct{}{}
+	}
+
+	entries, err := os.ReadDir(tasksDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error scanning task directories for virtual teams: %v", err)
+		}
+		return teams
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		teamName := entry.Name()
+		if _, ok := existing[teamName]; ok {
+			continue
+		}
+
+		createdAt := time.Now()
+		if info, err := entry.Info(); err == nil {
+			createdAt = info.ModTime()
+		}
+
+		leadSessionID := ""
+		if sessionIDPattern.MatchString(teamName) {
+			leadSessionID = teamName
+		}
+
+		teams = append(teams, types.TeamInfo{
+			Name:          teamName,
+			CreatedAt:     createdAt,
+			LeadSessionID: leadSessionID,
+			Members:       []types.AgentInfo{},
+			Tasks:         []types.TaskInfo{},
+		})
+	}
+
+	return teams
+}
+
+func (c *Collector) updateVirtualTeamTimestamp(team *types.TeamInfo, tasks []types.TaskInfo) {
+	if len(team.Members) > 0 || len(tasks) == 0 {
+		return
+	}
+
+	latest := team.CreatedAt
+	for _, task := range tasks {
+		if task.UpdatedAt.After(latest) {
+			latest = task.UpdatedAt
+		}
+		if task.CreatedAt.After(latest) {
+			latest = task.CreatedAt
+		}
+	}
+
+	if latest.After(team.CreatedAt) {
+		team.CreatedAt = latest
+	}
+}
+
+func (c *Collector) populateTeamProjectCwd(team *types.TeamInfo, projectsDir string) {
+	if team.ProjectCwd != "" {
+		return
+	}
+
+	// Prefer team-lead cwd from config.
+	for _, agent := range team.Members {
+		if agent.Name == "team-lead" && agent.Cwd != "" {
+			team.ProjectCwd = agent.Cwd
+			return
+		}
+	}
+
+	// Fallback to first available member cwd.
+	for _, agent := range team.Members {
+		if agent.Cwd != "" {
+			team.ProjectCwd = agent.Cwd
+			return
+		}
+	}
+
+	// For task-only teams, recover cwd from lead session log.
+	if team.LeadSessionID == "" {
+		return
+	}
+
+	cwd, err := parser.FindSessionCwd(projectsDir, team.LeadSessionID)
+	if err != nil {
+		log.Printf("Error resolving project cwd for team %s (session %s): %v", team.Name, team.LeadSessionID, err)
+		return
+	}
+	if cwd != "" {
+		team.ProjectCwd = cwd
+	}
 }
 
 // loadAgentInboxes loads inbox messages for all agents in a team
@@ -354,15 +463,23 @@ func (c *Collector) Stop() error {
 
 // filterStaleTeams removes teams where all members have been inactive
 // longer than the given threshold.
-func filterStaleTeams(teams []types.TeamInfo, threshold time.Duration) []types.TeamInfo {
+func filterStaleTeams(teams []types.TeamInfo, threshold time.Duration, tasksDir string) []types.TeamInfo {
 	now := time.Now()
 	result := make([]types.TeamInfo, 0, len(teams))
 
 	for _, team := range teams {
 		if isTeamActive(team, now, threshold) {
 			result = append(result, team)
-		} else {
-			log.Printf("Hiding stale team %q (no activity for %v)", team.Name, threshold)
+			continue
+		}
+		// Virtual team (no config file): remove orphaned task directory.
+		if team.ConfigPath == "" {
+			dir := filepath.Join(tasksDir, team.Name)
+			if err := os.RemoveAll(dir); err != nil {
+				log.Printf("Failed to remove orphaned task dir %s: %v", dir, err)
+			} else {
+				log.Printf("Removed orphaned task dir for stale virtual team %q", team.Name)
+			}
 		}
 	}
 

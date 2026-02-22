@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -11,6 +12,7 @@ import (
 // FileSystemMonitor monitors Claude team and task directories
 type FileSystemMonitor struct {
 	watcher   *fsnotify.Watcher
+	claudeDir string
 	teamsDir  string
 	tasksDir  string
 	onChange  func(event fsnotify.Event)
@@ -28,11 +30,13 @@ func NewFileSystemMonitor(onChange func(event fsnotify.Event)) (*FileSystemMonit
 		return nil, err
 	}
 
-	teamsDir := filepath.Join(homeDir, ".claude", "teams")
-	tasksDir := filepath.Join(homeDir, ".claude", "tasks")
+	claudeDir := filepath.Join(homeDir, ".claude")
+	teamsDir := filepath.Join(claudeDir, "teams")
+	tasksDir := filepath.Join(claudeDir, "tasks")
 
 	return &FileSystemMonitor{
 		watcher:   watcher,
+		claudeDir: claudeDir,
 		teamsDir:  teamsDir,
 		tasksDir:  tasksDir,
 		onChange:  onChange,
@@ -41,25 +45,47 @@ func NewFileSystemMonitor(onChange func(event fsnotify.Event)) (*FileSystemMonit
 
 // Start begins monitoring the filesystem
 func (fsm *FileSystemMonitor) Start() error {
-	// Create directories if they don't exist
-	os.MkdirAll(fsm.teamsDir, 0755)
-	os.MkdirAll(fsm.tasksDir, 0755)
-
-	// Watch teams directory
-	if err := fsm.watcher.Add(fsm.teamsDir); err != nil {
+	// Watch root directories and existing subdirectories.
+	// This allows auto-recovery when users manually remove ~/.claude/teams or ~/.claude/tasks.
+	if err := fsm.ensureRootsWatched(); err != nil {
 		return err
 	}
-
-	// Watch tasks directory
-	if err := fsm.watcher.Add(fsm.tasksDir); err != nil {
-		return err
-	}
-
-	// Watch subdirectories in teams
-	fsm.watchSubdirectories(fsm.teamsDir)
-	fsm.watchSubdirectories(fsm.tasksDir)
 
 	go fsm.watch()
+	return nil
+}
+
+func (fsm *FileSystemMonitor) ensureRootsWatched() error {
+	if err := os.MkdirAll(fsm.teamsDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(fsm.tasksDir, 0755); err != nil {
+		return err
+	}
+
+	if err := fsm.addWatch(fsm.claudeDir); err != nil {
+		return err
+	}
+	if err := fsm.addWatch(fsm.teamsDir); err != nil {
+		return err
+	}
+	if err := fsm.addWatch(fsm.tasksDir); err != nil {
+		return err
+	}
+
+	fsm.watchSubdirectories(fsm.teamsDir)
+	fsm.watchSubdirectories(fsm.tasksDir)
+	return nil
+}
+
+func (fsm *FileSystemMonitor) addWatch(path string) error {
+	if err := fsm.watcher.Add(path); err != nil {
+		// fsnotify returns an "already exists" error on duplicate adds.
+		if strings.Contains(err.Error(), "already exists") {
+			return nil
+		}
+		return err
+	}
 	return nil
 }
 
@@ -70,7 +96,9 @@ func (fsm *FileSystemMonitor) watchSubdirectories(dir string) {
 			return nil
 		}
 		if info.IsDir() && path != dir {
-			fsm.watcher.Add(path)
+			if err := fsm.addWatch(path); err != nil {
+				log.Printf("Failed to watch subdirectory %s: %v", path, err)
+			}
 		}
 		return nil
 	})
@@ -85,10 +113,20 @@ func (fsm *FileSystemMonitor) watch() {
 				return
 			}
 
+			// Recover root watches after manual directory cleanup/recreation.
+			if event.Op&(fsnotify.Create|fsnotify.Remove|fsnotify.Rename) != 0 {
+				if err := fsm.ensureRootsWatched(); err != nil {
+					log.Printf("Failed to recover root watchers: %v", err)
+				}
+			}
+
 			// Handle directory creation to watch new subdirectories
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					fsm.watcher.Add(event.Name)
+					if err := fsm.addWatch(event.Name); err != nil {
+						log.Printf("Failed to watch new directory %s: %v", event.Name, err)
+					}
+					fsm.watchSubdirectories(event.Name)
 				}
 			}
 

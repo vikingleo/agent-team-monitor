@@ -32,7 +32,7 @@ func TestFindAgentLogFileForMember_MatchesMemberPromptWithSameCwd(t *testing.T) 
 			assistantTextMessage("已开始熟悉代码。")),
 	})
 
-	path, agentID, err := FindAgentLogFileForMember(projectsDir, leadSessionID, "admin-developer", cwd, time.Time{})
+	path, agentID, _, err := FindAgentLogFileForMember(projectsDir, leadSessionID, "admin-developer", cwd, time.Time{})
 	if err != nil {
 		t.Fatalf("FindAgentLogFileForMember returned error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestFindAgentLogFileForMember_UsesJoinedAtAndAliasForGeneration(t *testing.
 	})
 
 	joinedAt := time.Date(2026, 2, 11, 10, 0, 0, 0, time.UTC)
-	path, agentID, err := FindAgentLogFileForMember(projectsDir, leadSessionID, "api-developer-2", cwd, joinedAt)
+	path, agentID, _, err := FindAgentLogFileForMember(projectsDir, leadSessionID, "api-developer-2", cwd, joinedAt)
 	if err != nil {
 		t.Fatalf("FindAgentLogFileForMember returned error: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestFindAgentLogFileForMember_HandlesLongJSONLLine(t *testing.T) {
 			messageString(veryLongPrompt)),
 	})
 
-	path, agentID, err := FindAgentLogFileForMember(projectsDir, leadSessionID, "api-developer", cwd, time.Time{})
+	path, agentID, _, err := FindAgentLogFileForMember(projectsDir, leadSessionID, "api-developer", cwd, time.Time{})
 	if err != nil {
 		t.Fatalf("FindAgentLogFileForMember returned error: %v", err)
 	}

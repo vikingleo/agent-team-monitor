@@ -572,6 +572,43 @@ func FindLeadSessionLogFile(projectsDir, leadSessionID string) (string, error) {
 	return best, nil
 }
 
+// FindSessionCwd returns the absolute working directory (cwd) for a session.
+// It reads the root session log and returns the first non-empty cwd found.
+func FindSessionCwd(projectsDir, sessionID string) (string, error) {
+	logPath, err := FindLeadSessionLogFile(projectsDir, sessionID)
+	if err != nil || logPath == "" {
+		return "", err
+	}
+
+	file, err := os.Open(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := newLargeScanner(file)
+	const maxScanLines = 200
+
+	for i := 0; i < maxScanLines && scanner.Scan(); i++ {
+		var record activityRecord
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			continue
+		}
+		if record.Cwd != "" {
+			return record.Cwd, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return "", nil
+}
+
 // FindAgentLogFile finds the agent's log file by matching agent ID (deprecated, use FindAgentLogFileByCwd)
 func FindAgentLogFile(projectsDir, agentID string) (string, error) {
 	// Search for agent log files

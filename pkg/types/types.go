@@ -7,6 +7,7 @@ type TeamInfo struct {
 	Name          string      `json:"name"`
 	CreatedAt     time.Time   `json:"created_at"`
 	LeadSessionID string      `json:"lead_session_id,omitempty"`
+	ProjectCwd    string      `json:"project_cwd,omitempty"`
 	Members       []AgentInfo `json:"members"`
 	Tasks         []TaskInfo  `json:"tasks"`
 	ConfigPath    string      `json:"config_path"`

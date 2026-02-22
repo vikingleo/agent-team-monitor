@@ -124,6 +124,9 @@ func (s *Server) handleTeamAction(w http.ResponseWriter, r *http.Request) {
 // respondJSON writes a JSON response
 func respondJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		log.Printf("Error encoding JSON: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
