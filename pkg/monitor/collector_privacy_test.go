@@ -46,3 +46,58 @@ func TestSanitizeDisplayPath(t *testing.T) {
 		})
 	}
 }
+
+func TestReadBoolEnv(t *testing.T) {
+	tests := []struct {
+		name         string
+		value        string
+		defaultValue bool
+		want         bool
+	}{
+		{
+			name:         "empty uses default",
+			value:        "",
+			defaultValue: true,
+			want:         true,
+		},
+		{
+			name:         "standard true",
+			value:        "true",
+			defaultValue: false,
+			want:         true,
+		},
+		{
+			name:         "alias yes",
+			value:        "yes",
+			defaultValue: false,
+			want:         true,
+		},
+		{
+			name:         "alias no",
+			value:        "no",
+			defaultValue: true,
+			want:         false,
+		},
+		{
+			name:         "invalid uses default",
+			value:        "invalid",
+			defaultValue: false,
+			want:         false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.value == "" {
+				t.Setenv("ATM_BOOL_TEST", "")
+			} else {
+				t.Setenv("ATM_BOOL_TEST", tc.value)
+			}
+
+			got := readBoolEnv("ATM_BOOL_TEST", tc.defaultValue)
+			if got != tc.want {
+				t.Fatalf("readBoolEnv got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

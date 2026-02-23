@@ -1,4 +1,4 @@
-# Claude Agent Team Monitor
+# Agent Team Monitor
 
 [中文](#中文) | [English](#english)
 
@@ -6,7 +6,7 @@
 
 <a id="中文"></a>
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 智能体团队实时监控面板。在终端或浏览器中追踪团队成员、任务状态、智能体思考过程、工具调用和进程信息。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) + Codex 智能体团队实时监控面板。在终端或浏览器中追踪团队成员、任务状态、智能体思考过程、工具调用和进程信息。
 
 ## 截图
 
@@ -23,9 +23,9 @@
 - **团队总览** — 查看所有活跃的智能体团队、成员、角色和状态
 - **任务追踪** — 任务按负责人分组展示，实时状态更新
 - **智能体活动** — 实时显示思考过程 (💭)、工具调用 (🔧)、消息摘要 (📨)
-- **进程监控** — 追踪运行中的 Claude Code 进程及运行时长
+- **进程监控** — 追踪运行中的 Claude Code / Codex 进程及运行时长
 - **双模式** — 终端 UI 和 Web 面板布局一致
-- **文件监听** — 基于 fsnotify 监听 `~/.claude/teams/` 和 `~/.claude/tasks/`
+- **文件监听** — 基于 fsnotify 监听 `~/.claude/teams/`、`~/.claude/tasks/`、`~/.claude/projects/`、`~/.codex/sessions/`
 - **自动刷新** — 两种模式均支持 1 秒智能更新
 
 ## 快速开始
@@ -40,6 +40,12 @@ make build
 
 ```bash
 ./bin/agent-team-monitor
+
+# 仅监控 codex
+./bin/agent-team-monitor -provider codex
+
+# 同时监控 claude + codex
+./bin/agent-team-monitor -provider both
 ```
 
 | 按键           | 操作     |
@@ -54,6 +60,9 @@ make build
 
 # 自定义端口
 ./bin/agent-team-monitor -web -addr :3000
+
+# Web + 仅 codex
+./bin/agent-team-monitor -web -provider codex
 ```
 
 浏览器打开 `http://localhost:3000`（默认是8080）。
@@ -71,6 +80,11 @@ GET /api/health     # 健康检查
 curl http://localhost:3000/api/state | jq
 ```
 
+## 环境变量
+
+- `ATM_EXPOSE_ABS_PATHS` — 默认 `false`，设置为 `true/yes/on` 后，API 返回绝对路径（否则脱敏）
+- `ATM_DISCOVERY_METRICS` — 默认 `false`，设置为 `true/yes/on` 后，输出 team 发现链路性能日志（耗时、缓存命中率、命中数）
+
 ## 工作原理
 
 监控器监听 Claude Code 智能体的文件系统：
@@ -80,7 +94,11 @@ curl http://localhost:3000/api/state | jq
 ├── teams/{team-name}/config.json       # 团队配置与成员
 ├── tasks/{team-name}/*.json            # 任务定义与状态
 ├── teams/{team-name}/inboxes/          # 智能体收件箱
-└── projects/*/activity.jsonl           # 智能体活动日志
+├── projects/{project}/{session}.jsonl  # team lead 根会话日志
+└── projects/{project}/{session}/subagents/agent-*.jsonl # 成员会话日志
+
+~/.codex/
+└── sessions/YYYY/MM/DD/rollout-*.jsonl # Codex 会话日志
 ```
 
 ## 项目结构
@@ -121,11 +139,11 @@ make build-all
 
 ## 常见问题
 
-**未检测到团队** — 确认 Claude Code 已在 `~/.claude/teams/` 下创建团队，且 config.json 文件有效。
+**未检测到团队** — 监控器会从 `~/.claude/teams/`、`~/.claude/tasks/`、`~/.claude/projects/` 和 `~/.codex/sessions/` 发现活动。若仍为空，请检查这些目录是否有最近数据。
 
-**未检测到进程** — 确认 Claude Code 正在运行。监控器扫描包含 "claude" 的进程。
+**未检测到进程** — 确认 Claude Code 或 Codex 正在运行。监控器会扫描 `claude` / `codex` 相关进程。
 
-**权限错误** — 确认对 `~/.claude/` 目录有读取权限。
+**权限错误** — 确认对 `~/.claude/` 与 `~/.codex/` 目录有读取权限。
 
 ## 许可证
 
@@ -137,7 +155,7 @@ MIT
 
 ## English
 
-Real-time monitoring dashboard for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent teams. Track team members, tasks, agent thinking, tool usage, and processes — in your terminal or browser.
+Real-time monitoring dashboard for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) + Codex agent teams. Track team members, tasks, agent thinking, tool usage, and processes — in your terminal or browser.
 
 ## Screenshots
 
@@ -154,9 +172,9 @@ Real-time monitoring dashboard for [Claude Code](https://docs.anthropic.com/en/d
 - **Team Overview** — All active agent teams, members, roles, and status at a glance
 - **Task Tracking** — Tasks grouped by assigned agent with real-time status
 - **Agent Activity** — Live display of thinking (💭), tool usage (🔧), and messages (📨)
-- **Process Monitoring** — Running Claude Code processes with uptime
+- **Process Monitoring** — Running Claude Code / Codex processes with uptime
 - **Dual Mode** — Terminal UI and Web dashboard with consistent layout
-- **File Watching** — fsnotify-based monitoring of `~/.claude/teams/` and `~/.claude/tasks/`
+- **File Watching** — fsnotify-based monitoring of `~/.claude/teams/`, `~/.claude/tasks/`, `~/.claude/projects/`, and `~/.codex/sessions/`
 - **Auto Refresh** — 1-second smart updates in both modes
 
 ## Quick Start
@@ -171,6 +189,12 @@ make build
 
 ```bash
 ./bin/agent-team-monitor
+
+# Codex only
+./bin/agent-team-monitor -provider codex
+
+# Claude + Codex
+./bin/agent-team-monitor -provider both
 ```
 
 | Key            | Action         |
@@ -185,6 +209,9 @@ make build
 
 # Custom port
 ./bin/agent-team-monitor -web -addr :3000
+
+# Web + codex only
+./bin/agent-team-monitor -web -provider codex
 ```
 
 Open `http://localhost:3000` in your browser(The default port number is 8080).
@@ -202,6 +229,11 @@ GET /api/health     # Health check
 curl http://localhost:3000/api/state | jq
 ```
 
+## Environment Variables
+
+- `ATM_EXPOSE_ABS_PATHS` — default `false`; set `true/yes/on` to expose absolute paths in API output
+- `ATM_DISCOVERY_METRICS` — default `false`; set `true/yes/on` to log discovery performance metrics (latency, cache hit rate, hit counts)
+
 ## How It Works
 
 The monitor watches the Claude Code agent filesystem:
@@ -211,7 +243,11 @@ The monitor watches the Claude Code agent filesystem:
 ├── teams/{team-name}/config.json       # Team config & members
 ├── tasks/{team-name}/*.json            # Task definitions & status
 ├── teams/{team-name}/inboxes/          # Agent inbox messages
-└── projects/*/activity.jsonl           # Agent activity logs
+├── projects/{project}/{session}.jsonl  # Team lead root session log
+└── projects/{project}/{session}/subagents/agent-*.jsonl # Member session logs
+
+~/.codex/
+└── sessions/YYYY/MM/DD/rollout-*.jsonl # Codex session logs
 ```
 
 ## Architecture
@@ -252,11 +288,11 @@ Outputs binaries for macOS (amd64/arm64) and Linux (amd64/arm64).
 
 ## Troubleshooting
 
-**No teams detected** — Ensure Claude Code has created teams in `~/.claude/teams/` with valid config.json files.
+**No teams detected** — The monitor discovers activity from `~/.claude/teams/`, `~/.claude/tasks/`, `~/.claude/projects/`, and `~/.codex/sessions/`. If still empty, verify recent activity exists in those directories.
 
-**No processes detected** — Make sure Claude Code is running. The monitor scans for processes containing "claude".
+**No processes detected** — Make sure Claude Code or Codex is running. The monitor scans `claude` / `codex` related processes.
 
-**Permission errors** — Ensure read access to `~/.claude/` directory.
+**Permission errors** — Ensure read access to both `~/.claude/` and `~/.codex/` directories.
 
 ## License
 

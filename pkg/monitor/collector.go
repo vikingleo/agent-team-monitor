@@ -18,22 +18,60 @@ import (
 
 var sessionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var windowsAbsPathPattern = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
-var exposeAbsolutePaths = readExposeAbsolutePaths()
+var teamTokenPattern = regexp.MustCompile(`[a-z0-9]+`)
+var teamTokenStopWords = map[string]struct{}{
+	"team":      {},
+	"dev":       {},
+	"agent":     {},
+	"project":   {},
+	"projects":  {},
+	"workspace": {},
+	"work":      {},
+	"works":     {},
+	"home":      {},
+	"users":     {},
+	"user":      {},
+	"code":      {},
+}
+var exposeAbsolutePaths = readBoolEnv("ATM_EXPOSE_ABS_PATHS", false)
+var discoveryMetricsLoggingEnabled = readBoolEnv("ATM_DISCOVERY_METRICS", false)
+
+const projectDiscoveryMaxAge = 2 * time.Hour
+const codexSessionDiscoveryMaxAge = 8 * time.Hour
+const codexWorkingRecentThreshold = 2 * time.Minute
+const discoveryMetricsLogInterval = 30 * time.Second
+const discoveryMetricsSlowThreshold = 500 * time.Millisecond
+
+// CollectorOptions controls collector behavior.
+type CollectorOptions struct {
+	Provider ProviderMode
+}
 
 // Collector collects and aggregates monitoring data
 type Collector struct {
-	processMonitor *ProcessMonitor
-	fsMonitor      *FileSystemMonitor
-	state          *types.MonitorState
-	stateMutex     sync.RWMutex
-	updateChan     chan struct{}
-	stopOnce       sync.Once
+	processMonitor          *ProcessMonitor
+	fsMonitor               *FileSystemMonitor
+	provider                ProviderMode
+	state                   *types.MonitorState
+	stateMutex              sync.RWMutex
+	updateChan              chan struct{}
+	stopOnce                sync.Once
+	lastDiscoveryMetrics    parser.DiscoveryMetrics
+	lastDiscoveryMetricsLog time.Time
 }
 
 // NewCollector creates a new data collector
 func NewCollector() (*Collector, error) {
+	return NewCollectorWithOptions(CollectorOptions{})
+}
+
+// NewCollectorWithOptions creates a collector with explicit options.
+func NewCollectorWithOptions(options CollectorOptions) (*Collector, error) {
+	provider := normalizeProviderMode(options.Provider)
+
 	c := &Collector{
 		processMonitor: NewProcessMonitor(),
+		provider:       provider,
 		state: &types.MonitorState{
 			Teams:     []types.TeamInfo{},
 			Processes: []types.ProcessInfo{},
@@ -43,7 +81,9 @@ func NewCollector() (*Collector, error) {
 	}
 
 	// Create filesystem monitor with callback
-	fsMonitor, err := NewFileSystemMonitor(func(event fsnotify.Event) {
+	fsMonitor, err := NewFileSystemMonitor(FileSystemMonitorOptions{
+		Provider: provider,
+	}, func(event fsnotify.Event) {
 		// Trigger state update on filesystem changes
 		select {
 		case c.updateChan <- struct{}{}:
@@ -101,14 +141,31 @@ func (c *Collector) updateState() {
 	defer c.stateMutex.Unlock()
 
 	// Collect process information
-	processes, err := c.processMonitor.FindClaudeProcesses()
+	processes, err := c.processMonitor.FindProcesses(c.provider)
 	if err != nil {
-		log.Printf("Error finding Claude processes: %v", err)
+		log.Printf("Error finding monitored processes: %v", err)
 		processes = []types.ProcessInfo{}
 	}
 
-	// Collect team information
 	homeDir, _ := os.UserHomeDir()
+	allTeams := make([]types.TeamInfo, 0)
+
+	if c.provider.IncludesClaude() {
+		claudeTeams := c.collectClaudeTeams(homeDir)
+		allTeams = append(allTeams, claudeTeams...)
+	}
+	if c.provider.IncludesCodex() {
+		codexTeams := c.collectCodexTeams(homeDir)
+		allTeams = append(allTeams, codexTeams...)
+	}
+
+	// Update state
+	c.state.Teams = allTeams
+	c.state.Processes = processes
+	c.state.UpdatedAt = time.Now()
+}
+
+func (c *Collector) collectClaudeTeams(homeDir string) []types.TeamInfo {
 	teamsDir := filepath.Join(homeDir, ".claude", "teams")
 	tasksDir := filepath.Join(homeDir, ".claude", "tasks")
 	projectsDir := filepath.Join(homeDir, ".claude", "projects")
@@ -119,8 +176,18 @@ func (c *Collector) updateState() {
 		teams = []types.TeamInfo{}
 	}
 	teams = mergeTaskOnlyTeams(teams, tasksDir)
+	teams = mergeInboxOnlyTeams(teams, teamsDir)
 
-	// Load tasks for each team
+	discoveryStart := time.Now()
+	discoveredTeams, err := parser.DiscoverProjectTeams(projectsDir, projectDiscoveryMaxAge)
+	discoveryElapsed := time.Since(discoveryStart)
+	if err != nil {
+		log.Printf("Error discovering teams from projects: %v", err)
+	} else {
+		teams = mergeDiscoveredProjectTeams(teams, discoveredTeams)
+		c.logDiscoveryMetrics(discoveryElapsed, discoveredTeams)
+	}
+
 	for i := range teams {
 		// Load visible tasks (excluding internal tasks)
 		tasks, err := parser.ScanTasks(tasksDir, teams[i].Name)
@@ -150,12 +217,155 @@ func (c *Collector) updateState() {
 
 		// Build shared office narrative fields for TUI/Web
 		c.buildAgentNarratives(&teams[i])
+		markTeamProvider(&teams[i], "claude")
 	}
 
-	// Update state
-	c.state.Teams = filterStaleTeams(teams, 30*time.Minute, tasksDir)
-	c.state.Processes = processes
-	c.state.UpdatedAt = time.Now()
+	return filterStaleTeams(teams, 30*time.Minute, tasksDir)
+}
+
+func (c *Collector) collectCodexTeams(homeDir string) []types.TeamInfo {
+	sessionsDir := filepath.Join(homeDir, ".codex", "sessions")
+	discovered, err := parser.DiscoverCodexSessions(sessionsDir, codexSessionDiscoveryMaxAge)
+	if err != nil {
+		log.Printf("Error discovering codex sessions: %v", err)
+		return []types.TeamInfo{}
+	}
+
+	now := time.Now()
+	teams := make([]types.TeamInfo, 0, len(discovered))
+	for _, session := range discovered {
+		lastActive := session.LastActiveAt
+		if lastActive.IsZero() {
+			lastActive = session.StartedAt
+		}
+
+		createdAt := session.StartedAt
+		if createdAt.IsZero() {
+			createdAt = lastActive
+		}
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+
+		status := "idle"
+		if !lastActive.IsZero() && now.Sub(lastActive) <= codexWorkingRecentThreshold {
+			status = "working"
+		}
+
+		messageSummary := session.LastAgentMessage
+		latestMessage := session.LastAgentMessage
+		if messageSummary == "" {
+			messageSummary = session.LastUserMessage
+		}
+		if latestMessage == "" {
+			latestMessage = session.LastUserMessage
+		}
+
+		agent := types.AgentInfo{
+			Name:            "codex-agent",
+			Provider:        "codex",
+			AgentID:         session.SessionID,
+			AgentType:       "codex",
+			Status:          status,
+			CurrentTask:     session.LastUserMessage,
+			LastActivity:    lastActive,
+			Cwd:             session.Cwd,
+			LatestMessage:   latestMessage,
+			MessageSummary:  messageSummary,
+			LastMessageTime: lastActive,
+			LastThinking:    session.LastReasoning,
+			LastToolUse:     session.LastToolUse,
+			LastToolDetail:  session.LastToolDetail,
+			LastActiveTime:  lastActive,
+		}
+
+		team := types.TeamInfo{
+			Name:          codexTeamName(session.SessionID, session.Cwd),
+			Provider:      "codex",
+			CreatedAt:     createdAt,
+			LeadSessionID: session.SessionID,
+			ProjectCwd:    session.Cwd,
+			Members:       []types.AgentInfo{agent},
+			Tasks:         []types.TaskInfo{},
+		}
+		c.buildAgentNarratives(&team)
+		teams = append(teams, team)
+	}
+
+	return teams
+}
+
+func markTeamProvider(team *types.TeamInfo, provider string) {
+	team.Provider = provider
+	for i := range team.Members {
+		if team.Members[i].Provider == "" {
+			team.Members[i].Provider = provider
+		}
+	}
+}
+
+func codexTeamName(sessionID, cwd string) string {
+	shortID := strings.TrimSpace(sessionID)
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	if shortID == "" {
+		shortID = "unknown"
+	}
+
+	cwdBase := strings.TrimSpace(filepath.Base(cwd))
+	if cwdBase == "" || cwdBase == "." || cwdBase == string(filepath.Separator) {
+		return "codex-" + shortID
+	}
+	cwdBase = strings.ReplaceAll(cwdBase, " ", "-")
+	return "codex-" + cwdBase + "-" + shortID
+}
+
+func (c *Collector) logDiscoveryMetrics(elapsed time.Duration, discovered []parser.ProjectTeamDiscovery) {
+	if !discoveryMetricsLoggingEnabled {
+		return
+	}
+
+	snapshot := parser.SnapshotDiscoveryMetrics()
+	delta := snapshot.Delta(c.lastDiscoveryMetrics)
+	c.lastDiscoveryMetrics = snapshot
+
+	now := time.Now()
+	if !c.lastDiscoveryMetricsLog.IsZero() &&
+		now.Sub(c.lastDiscoveryMetricsLog) < discoveryMetricsLogInterval &&
+		elapsed < discoveryMetricsSlowThreshold {
+		return
+	}
+	c.lastDiscoveryMetricsLog = now
+
+	memberCount := 0
+	for _, team := range discovered {
+		memberCount += len(team.Members)
+	}
+
+	rootReq := delta.RootCacheHits + delta.RootCacheMisses
+	subReq := delta.SubCacheHits + delta.SubCacheMisses
+
+	log.Printf(
+		"Project discovery metrics: elapsed=%s teams=%d members=%d runs=+%d root-cache=%d/%d(%.1f%%) sub-cache=%d/%d(%.1f%%)",
+		elapsed.Round(time.Millisecond),
+		len(discovered),
+		memberCount,
+		delta.Runs,
+		delta.RootCacheHits,
+		rootReq,
+		discoveryHitRate(delta.RootCacheHits, rootReq),
+		delta.SubCacheHits,
+		subReq,
+		discoveryHitRate(delta.SubCacheHits, subReq),
+	)
+}
+
+func discoveryHitRate(hits, total int64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return float64(hits) * 100 / float64(total)
 }
 
 // mergeTaskOnlyTeams creates virtual teams for task directories that have no team config.
@@ -203,6 +413,385 @@ func mergeTaskOnlyTeams(teams []types.TeamInfo, tasksDir string) []types.TeamInf
 	}
 
 	return teams
+}
+
+// mergeInboxOnlyTeams creates virtual teams for ~/.claude/teams/<team>/inboxes-only directories.
+func mergeInboxOnlyTeams(teams []types.TeamInfo, teamsDir string) []types.TeamInfo {
+	existing := make(map[string]struct{}, len(teams))
+	for _, team := range teams {
+		existing[team.Name] = struct{}{}
+	}
+
+	entries, err := os.ReadDir(teamsDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error scanning team directories for inbox-only teams: %v", err)
+		}
+		return teams
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		teamName := entry.Name()
+		if _, ok := existing[teamName]; ok {
+			continue
+		}
+
+		configPath := filepath.Join(teamsDir, teamName, "config.json")
+		if _, err := os.Stat(configPath); err == nil {
+			continue
+		}
+
+		inboxesDir := filepath.Join(teamsDir, teamName, "inboxes")
+		inboxEntries, err := os.ReadDir(inboxesDir)
+		if err != nil || len(inboxEntries) == 0 {
+			continue
+		}
+
+		createdAt := latestInboxesModTime(inboxesDir)
+		if createdAt.IsZero() {
+			if info, err := entry.Info(); err == nil {
+				createdAt = info.ModTime()
+			} else {
+				createdAt = time.Now()
+			}
+		}
+
+		leadSessionID := ""
+		if sessionIDPattern.MatchString(teamName) {
+			leadSessionID = teamName
+		}
+
+		teams = append(teams, types.TeamInfo{
+			Name:          teamName,
+			CreatedAt:     createdAt,
+			LeadSessionID: leadSessionID,
+			Members:       []types.AgentInfo{},
+			Tasks:         []types.TaskInfo{},
+		})
+		existing[teamName] = struct{}{}
+	}
+
+	return teams
+}
+
+func latestInboxesModTime(inboxesDir string) time.Time {
+	entries, err := os.ReadDir(inboxesDir)
+	if err != nil {
+		return time.Time{}
+	}
+
+	latest := time.Time{}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if latest.IsZero() || info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+	}
+	return latest
+}
+
+func mergeDiscoveredProjectTeams(teams []types.TeamInfo, discovered []parser.ProjectTeamDiscovery) []types.TeamInfo {
+	if len(discovered) == 0 {
+		return teams
+	}
+
+	nameToIndex := make(map[string]int, len(teams))
+	sessionToIndex := make(map[string]int, len(teams))
+	cwdToIndex := make(map[string]int, len(teams))
+
+	for i, team := range teams {
+		nameToIndex[team.Name] = i
+		if team.LeadSessionID != "" {
+			sessionToIndex[team.LeadSessionID] = i
+		}
+		if team.ProjectCwd != "" {
+			cwdToIndex[team.ProjectCwd] = i
+		}
+	}
+
+	for _, found := range discovered {
+		targetIdx := -1
+
+		if found.TeamNameHint != "" {
+			if idx, ok := nameToIndex[found.TeamNameHint]; ok {
+				targetIdx = idx
+			}
+		}
+		if targetIdx == -1 && found.LeadSessionID != "" {
+			if idx, ok := sessionToIndex[found.LeadSessionID]; ok {
+				targetIdx = idx
+			}
+		}
+		if targetIdx == -1 && found.ProjectCwd != "" {
+			if idx, ok := cwdToIndex[found.ProjectCwd]; ok {
+				targetIdx = idx
+			}
+		}
+
+		resolvedName := resolveDiscoveredTeamName(found, teams)
+		if targetIdx == -1 && resolvedName != "" {
+			if idx, ok := nameToIndex[resolvedName]; ok {
+				targetIdx = idx
+			}
+		}
+
+		if targetIdx == -1 {
+			// Strict mode: skip low-confidence orphan sessions to avoid
+			// showing one-off delegated subagents as standalone teams.
+			if resolvedName == "" && !isHighConfidenceDiscoveredTeam(found) {
+				continue
+			}
+			if resolvedName == "" {
+				resolvedName = discoveredFallbackTeamName(found.LeadSessionID, found.ProjectCwd)
+			}
+			createdAt := found.LastActiveAt
+			if createdAt.IsZero() {
+				createdAt = time.Now()
+			}
+
+			teams = append(teams, types.TeamInfo{
+				Name:          resolvedName,
+				CreatedAt:     createdAt,
+				LeadSessionID: found.LeadSessionID,
+				ProjectCwd:    found.ProjectCwd,
+				Members:       append([]types.AgentInfo(nil), found.Members...),
+				Tasks:         []types.TaskInfo{},
+			})
+			targetIdx = len(teams) - 1
+			nameToIndex[resolvedName] = targetIdx
+		} else {
+			mergeDiscoveredTeamFields(&teams[targetIdx], found)
+		}
+
+		if teams[targetIdx].LeadSessionID != "" {
+			sessionToIndex[teams[targetIdx].LeadSessionID] = targetIdx
+		}
+		if teams[targetIdx].ProjectCwd != "" {
+			cwdToIndex[teams[targetIdx].ProjectCwd] = targetIdx
+		}
+	}
+
+	return teams
+}
+
+func resolveDiscoveredTeamName(found parser.ProjectTeamDiscovery, teams []types.TeamInfo) string {
+	if found.TeamNameHint != "" {
+		return found.TeamNameHint
+	}
+
+	candidates := make([]types.TeamInfo, 0)
+	for _, team := range teams {
+		// Only match unresolved virtual teams (typically inbox-only).
+		if team.ConfigPath != "" || team.LeadSessionID != "" || len(team.Members) > 0 {
+			continue
+		}
+		candidates = append(candidates, team)
+	}
+
+	if len(candidates) == 0 {
+		return ""
+	}
+
+	bestName := ""
+	bestScore := 0
+	ambiguous := false
+
+	for _, candidate := range candidates {
+		score := scoreTeamNameMatch(candidate.Name, found)
+		if score > bestScore {
+			bestName = candidate.Name
+			bestScore = score
+			ambiguous = false
+			continue
+		}
+		if score == bestScore && score > 0 {
+			ambiguous = true
+		}
+	}
+
+	if bestScore > 0 && !ambiguous {
+		return bestName
+	}
+	return ""
+}
+
+func isHighConfidenceDiscoveredTeam(found parser.ProjectTeamDiscovery) bool {
+	if found.TeamNameHint != "" {
+		return true
+	}
+
+	namedMembers := 0
+	for _, member := range found.Members {
+		if isMeaningfulDiscoveredMember(member) {
+			namedMembers++
+		}
+	}
+
+	if namedMembers >= 2 {
+		return true
+	}
+	if namedMembers >= 1 && len(found.Members) >= 3 {
+		return true
+	}
+
+	return false
+}
+
+func isMeaningfulDiscoveredMember(member types.AgentInfo) bool {
+	name := strings.ToLower(strings.TrimSpace(member.Name))
+	if name == "" {
+		return false
+	}
+	if strings.HasPrefix(name, "agent-") {
+		id := strings.ToLower(strings.TrimSpace(member.AgentID))
+		return id != "" && name != "agent-"+id
+	}
+	return true
+}
+
+func scoreTeamNameMatch(teamName string, found parser.ProjectTeamDiscovery) int {
+	tokens := tokenizeName(teamName)
+	if len(tokens) == 0 {
+		return 0
+	}
+
+	corpus := strings.ToLower(found.ProjectCwd)
+	for _, member := range found.Members {
+		if member.Name != "" {
+			corpus += " " + strings.ToLower(member.Name)
+		}
+	}
+
+	score := 0
+	for token := range tokens {
+		if strings.Contains(corpus, token) {
+			score++
+		}
+	}
+	return score
+}
+
+func tokenizeName(raw string) map[string]struct{} {
+	result := make(map[string]struct{})
+	name := strings.ToLower(raw)
+	matches := teamTokenPattern.FindAllString(name, -1)
+	for _, token := range matches {
+		if len(token) < 3 {
+			continue
+		}
+		if _, skip := teamTokenStopWords[token]; skip {
+			continue
+		}
+		result[token] = struct{}{}
+	}
+	return result
+}
+
+func discoveredFallbackTeamName(leadSessionID, projectCwd string) string {
+	if leadSessionID != "" {
+		if len(leadSessionID) >= 8 {
+			return "session-" + leadSessionID[:8]
+		}
+		return "session-" + leadSessionID
+	}
+
+	base := strings.TrimSpace(filepath.Base(projectCwd))
+	if base != "" && base != "." && base != string(filepath.Separator) {
+		return "session-" + base
+	}
+
+	return "session-unknown"
+}
+
+func mergeDiscoveredTeamFields(team *types.TeamInfo, found parser.ProjectTeamDiscovery) {
+	if team.LeadSessionID == "" {
+		team.LeadSessionID = found.LeadSessionID
+	}
+	if team.ProjectCwd == "" {
+		team.ProjectCwd = found.ProjectCwd
+	}
+
+	if team.ConfigPath == "" && !found.LastActiveAt.IsZero() {
+		if team.CreatedAt.IsZero() || found.LastActiveAt.After(team.CreatedAt) {
+			team.CreatedAt = found.LastActiveAt
+		}
+	}
+
+	team.Members = mergeDiscoveredMembers(team.Members, found.Members)
+}
+
+func mergeDiscoveredMembers(existing, discovered []types.AgentInfo) []types.AgentInfo {
+	if len(discovered) == 0 {
+		return existing
+	}
+
+	index := make(map[string]int, len(existing))
+	for i, member := range existing {
+		key := memberMergeKey(member)
+		if key == "" {
+			continue
+		}
+		index[key] = i
+	}
+
+	for _, member := range discovered {
+		key := memberMergeKey(member)
+		if key == "" {
+			existing = append(existing, member)
+			continue
+		}
+		if idx, ok := index[key]; ok {
+			merged := existing[idx]
+			if merged.Name == "" {
+				merged.Name = member.Name
+			}
+			if merged.AgentID == "" {
+				merged.AgentID = member.AgentID
+			}
+			if merged.AgentType == "" {
+				merged.AgentType = member.AgentType
+			}
+			if merged.Cwd == "" {
+				merged.Cwd = member.Cwd
+			}
+			if merged.JoinedAt.IsZero() {
+				merged.JoinedAt = member.JoinedAt
+			}
+			if member.LastActiveTime.After(merged.LastActiveTime) {
+				merged.LastActiveTime = member.LastActiveTime
+				merged.LastActivity = member.LastActivity
+			}
+			existing[idx] = merged
+			continue
+		}
+
+		index[key] = len(existing)
+		existing = append(existing, member)
+	}
+
+	return existing
+}
+
+func memberMergeKey(member types.AgentInfo) string {
+	name := strings.ToLower(strings.TrimSpace(member.Name))
+	if name != "" && !strings.HasPrefix(name, "agent-") {
+		return "name:" + name
+	}
+
+	if member.AgentID != "" {
+		return "id:" + strings.ToLower(member.AgentID)
+	}
+	if name != "" {
+		return "name:" + name
+	}
+	return ""
 }
 
 func (c *Collector) updateVirtualTeamTimestamp(team *types.TeamInfo, tasks []types.TaskInfo) {
@@ -456,10 +1045,10 @@ func (c *Collector) GetState() types.MonitorState {
 	return stateCopy
 }
 
-func readExposeAbsolutePaths() bool {
-	raw := strings.TrimSpace(os.Getenv("ATM_EXPOSE_ABS_PATHS"))
+func readBoolEnv(key string, defaultValue bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return false
+		return defaultValue
 	}
 
 	enabled, err := strconv.ParseBool(raw)
@@ -470,8 +1059,10 @@ func readExposeAbsolutePaths() bool {
 	switch strings.ToLower(raw) {
 	case "on", "yes", "y":
 		return true
-	default:
+	case "off", "no", "n":
 		return false
+	default:
+		return defaultValue
 	}
 }
 

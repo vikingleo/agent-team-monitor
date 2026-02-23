@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Agent Team 监控器</title>
+    <title>Agent Team 监控器</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                 </span>
                 Agent Team Monitor
-                <small class="header-subtitle">for Claude Code</small>
+                <small class="header-subtitle">for Claude + Codex</small>
             </h1>
             <div class="header-info">
                 <span id="last-update">最后更新: --:--:--</span>
@@ -23,6 +23,22 @@
         </header>
 
         <main>
+            <div class="view-controls">
+                <div class="filter-group" id="provider-filter">
+                    <button class="filter-chip active" data-provider="all">全部</button>
+                    <button class="filter-chip" data-provider="claude">
+                        Claude <span class="filter-chip-count" id="claude-filter-count">(team:0,agent:0)</span>
+                    </button>
+                    <button class="filter-chip" data-provider="codex">
+                        Codex <span class="filter-chip-count" id="codex-filter-count">(team:0,agent:0)</span>
+                    </button>
+                </div>
+                <label class="filter-toggle" for="hide-idle-toggle">
+                    <input id="hide-idle-toggle" type="checkbox" checked>
+                    自动隐藏空闲
+                </label>
+            </div>
+
             <div class="tabs">
                 <button class="tab-button active" data-tab="teams">
                     <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
@@ -48,7 +64,7 @@
         </main>
 
         <footer>
-            <p>每秒自动刷新 | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a> | <a href="https://github.com/vikingleo/agent-team-monitor" target="_blank">Github</a></p>
+            <p>每秒自动刷新 | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a> + <a href="https://openai.com" target="_blank">Codex</a> | <a href="https://github.com/vikingleo/agent-team-monitor" target="_blank">Github</a></p>
         </footer>
     </div>
 

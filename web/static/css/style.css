@@ -234,6 +234,70 @@ header h1 {
     display: block;
 }
 
+/* ---- View Filters ---- */
+.view-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.filter-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.filter-chip {
+    border: 1px solid var(--border-default);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.filter-chip:hover {
+    border-color: rgba(34, 211, 238, 0.25);
+    color: var(--text-primary);
+}
+
+.filter-chip.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: rgba(34, 211, 238, 0.35);
+}
+
+.filter-chip-count {
+    margin-left: 4px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.filter-chip.active .filter-chip-count {
+    color: var(--accent);
+    opacity: 0.9;
+}
+
+.filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    user-select: none;
+}
+
+.filter-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent);
+}
+
 /* ---- Cards ---- */
 .card {
     background: var(--bg-card);
@@ -916,6 +980,12 @@ footer a:hover {
 @media (max-width: 768px) {
     .container {
         padding: 10px;
+    }
+
+    .view-controls {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
     }
 
     header {

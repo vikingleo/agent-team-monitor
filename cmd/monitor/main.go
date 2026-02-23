@@ -16,14 +16,15 @@ import (
 )
 
 var (
-	webMode = flag.Bool("web", false, "Run in web mode (HTTP server)")
-	webAddr = flag.String("addr", ":8080", "Web server address")
-	version = flag.Bool("version", false, "Show version information")
+	webMode  = flag.Bool("web", false, "Run in web mode (HTTP server)")
+	webAddr  = flag.String("addr", ":8080", "Web server address")
+	provider = flag.String("provider", "both", "Data source provider: claude, codex, both")
+	version  = flag.Bool("version", false, "Show version information")
 )
 
 const (
-	appVersion = "1.3.0"
-	appName    = "Claude Agent Team Monitor"
+	appVersion = "1.4.0"
+	appName    = "Agent Team Monitor"
 )
 
 func main() {
@@ -35,8 +36,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	providerMode, err := monitor.ParseProviderMode(*provider)
+	if err != nil {
+		log.Fatalf("Invalid provider mode: %v", err)
+	}
+
 	// Create collector
-	collector, err := monitor.NewCollector()
+	collector, err := monitor.NewCollectorWithOptions(monitor.CollectorOptions{
+		Provider: providerMode,
+	})
 	if err != nil {
 		log.Fatalf("Failed to create collector: %v", err)
 	}

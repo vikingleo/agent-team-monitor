@@ -10,12 +10,16 @@ const API_ENDPOINTS = {
 // State
 let isConnected = true;
 let updateInterval = null;
-let previousState = null; // 存储上一次的状态用于对比
+let previousState = null; // 存储上一次渲染状态用于对比
+let latestRawState = null; // 存储后端原始状态
+let currentProviderFilter = 'all'; // all | claude | codex
+let hideIdleAgents = true;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('Claude Agent Team Monitor initialized');
+    console.log('Agent Team Monitor initialized');
     initTabs();
+    initViewFilters();
     startAutoRefresh();
     fetchData();
 });
@@ -82,21 +86,176 @@ async function fetchData() {
 
 // Update UI with new data (智能更新，只更新变化的部分)
 function updateUI(data) {
-    updateLastUpdateTime(data.updated_at);
+    latestRawState = data;
+    renderFilteredUI();
+}
 
-    // 更新计数徽章
-    updateBadges(data);
+function initViewFilters() {
+    const chips = document.querySelectorAll('.filter-chip');
+    chips.forEach((chip) => {
+        chip.addEventListener('click', () => {
+            const nextFilter = chip.getAttribute('data-provider') || 'all';
+            currentProviderFilter = nextFilter;
+            chips.forEach(node => node.classList.toggle('active', node === chip));
+            renderFilteredUI();
+        });
+    });
+
+    const hideIdleToggle = document.getElementById('hide-idle-toggle');
+    if (hideIdleToggle) {
+        hideIdleToggle.checked = true;
+        hideIdleToggle.addEventListener('change', (event) => {
+            hideIdleAgents = Boolean(event.target.checked);
+            renderFilteredUI();
+        });
+    }
+}
+
+function renderFilteredUI() {
+    if (!latestRawState) {
+        return;
+    }
+
+    updateProviderFilterStats(latestRawState);
+
+    const filtered = buildFilteredState(latestRawState);
+    updateLastUpdateTime(filtered.updated_at || latestRawState.updated_at);
+    updateBadges(filtered);
 
     // 只在数据真正变化时才更新
-    if (!previousState || JSON.stringify(previousState.processes) !== JSON.stringify(data.processes)) {
-        updateProcesses(data.processes || []);
+    if (!previousState || JSON.stringify(previousState.processes) !== JSON.stringify(filtered.processes)) {
+        updateProcesses(filtered.processes || []);
     }
 
-    if (!previousState || JSON.stringify(previousState.teams) !== JSON.stringify(data.teams)) {
-        updateTeams(data.teams || []);
+    if (!previousState || JSON.stringify(previousState.teams) !== JSON.stringify(filtered.teams)) {
+        updateTeams(filtered.teams || []);
     }
 
-    previousState = data;
+    previousState = filtered;
+}
+
+function buildFilteredState(rawState) {
+    const sourceTeams = Array.isArray(rawState.teams) ? rawState.teams : [];
+    const sourceProcesses = Array.isArray(rawState.processes) ? rawState.processes : [];
+
+    const teams = sourceTeams
+        .filter(team => matchesProvider(currentProviderFilter, detectTeamProvider(team)))
+        .map(projectVisibleMembers)
+        .filter(team => shouldKeepTeam(team));
+
+    const processes = sourceProcesses.filter(process =>
+        matchesProvider(currentProviderFilter, detectProcessProvider(process))
+    );
+
+    return {
+        updated_at: rawState.updated_at,
+        teams,
+        processes
+    };
+}
+
+function projectVisibleMembers(team) {
+    const members = Array.isArray(team.members) ? team.members : [];
+    const visibleMembers = hideIdleAgents
+        ? members.filter(member => String(member.status || '').toLowerCase() !== 'idle')
+        : members;
+    return {
+        ...team,
+        members: visibleMembers
+    };
+}
+
+function updateProviderFilterStats(rawState) {
+    const sourceTeams = Array.isArray(rawState.teams) ? rawState.teams : [];
+    const counts = {
+        claude: { teams: 0, agents: 0 },
+        codex: { teams: 0, agents: 0 }
+    };
+
+    sourceTeams.forEach((team) => {
+        const provider = detectTeamProvider(team);
+        if (provider !== 'claude' && provider !== 'codex') {
+            return;
+        }
+
+        const projected = projectVisibleMembers(team);
+        if (!shouldKeepTeam(projected)) {
+            return;
+        }
+
+        counts[provider].teams += 1;
+        counts[provider].agents += Array.isArray(projected.members) ? projected.members.length : 0;
+    });
+
+    const claudeCount = document.getElementById('claude-filter-count');
+    if (claudeCount) {
+        claudeCount.textContent = `(team:${counts.claude.teams},agent:${counts.claude.agents})`;
+    }
+
+    const codexCount = document.getElementById('codex-filter-count');
+    if (codexCount) {
+        codexCount.textContent = `(team:${counts.codex.teams},agent:${counts.codex.agents})`;
+    }
+}
+
+function shouldKeepTeam(team) {
+    if (!hideIdleAgents) {
+        return true;
+    }
+
+    const members = Array.isArray(team.members) ? team.members : [];
+    if (members.length > 0) {
+        return true;
+    }
+
+    const tasks = Array.isArray(team.tasks) ? team.tasks : [];
+    return tasks.some(task => String(task.status || '').toLowerCase() !== 'completed');
+}
+
+function matchesProvider(activeFilter, entityProvider) {
+    if (activeFilter === 'all') {
+        return true;
+    }
+    return entityProvider === activeFilter;
+}
+
+function detectTeamProvider(team) {
+    const direct = String((team && team.provider) || '').toLowerCase();
+    if (direct === 'claude' || direct === 'codex') {
+        return direct;
+    }
+
+    const members = Array.isArray(team && team.members) ? team.members : [];
+    for (const member of members) {
+        const provider = String((member && member.provider) || '').toLowerCase();
+        if (provider === 'claude' || provider === 'codex') {
+            return provider;
+        }
+    }
+
+    const teamName = String((team && team.name) || '').toLowerCase();
+    if (teamName.startsWith('codex-')) {
+        return 'codex';
+    }
+
+    return 'unknown';
+}
+
+function detectProcessProvider(process) {
+    const direct = String((process && process.provider) || '').toLowerCase();
+    if (direct === 'claude' || direct === 'codex') {
+        return direct;
+    }
+
+    const cmd = String((process && process.command) || '').toLowerCase();
+    if (cmd.includes('codex')) {
+        return 'codex';
+    }
+    if (cmd.includes('claude')) {
+        return 'claude';
+    }
+
+    return 'unknown';
 }
 
 // Update count badges
@@ -132,7 +291,7 @@ function updateProcesses(processes) {
     const container = document.getElementById('processes-container');
 
     if (processes.length === 0) {
-        container.innerHTML = '<p class="empty-state">未检测到 Claude 进程</p>';
+        container.innerHTML = '<p class="empty-state">当前筛选下未检测到进程</p>';
         return;
     }
 
@@ -147,10 +306,12 @@ function updateProcesses(processes) {
 // Render a single process
 function renderProcess(process) {
     const uptime = formatUptime(process.started_at);
+    const provider = detectProcessProvider(process).toUpperCase();
     return `
         <div class="process-item">
             <div class="process-info">
                 <span class="process-pid">PID ${process.pid}</span>
+                <span class="process-uptime">${provider}</span>
                 <span class="process-uptime">${uptime}</span>
             </div>
             ${process.command ? `<div class="process-cmd">${escapeHtml(process.command)}</div>` : ''}
@@ -164,7 +325,7 @@ function updateTeams(teams) {
     const nav = document.getElementById('team-nav');
 
     if (teams.length === 0) {
-        container.innerHTML = '<p class="empty-state"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>未找到活动团队</p>';
+        container.innerHTML = '<p class="empty-state"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>当前筛选下未找到活动团队</p>';
         nav.innerHTML = '';
         nav.style.display = 'none';
         return;
@@ -182,7 +343,9 @@ function updateTeams(teams) {
         nav.style.display = '';
         nav.innerHTML = teams.map(team => {
             const teamId = `team-${encodeURIComponent(team.name)}`;
-            return `<a class="team-nav-item" data-team-id="${teamId}" title="${escapeHtml(team.name)}">${escapeHtml(team.name)}</a>`;
+            const provider = detectTeamProvider(team);
+            const providerBadge = provider === 'unknown' ? '' : ` [${escapeHtml(String(provider))}]`;
+            return `<a class="team-nav-item" data-team-id="${teamId}" title="${escapeHtml(team.name)}">${escapeHtml(team.name)}${providerBadge}</a>`;
         }).join('');
 
         // Bind click handlers
@@ -248,18 +411,21 @@ function renderTeam(team) {
     const projectCwd = team.project_cwd || '';
     const members = team.members || [];
     const tasks = team.tasks || [];
+    const provider = detectTeamProvider(team);
     const workingCount = members.filter(member => member.status === 'working').length;
     const teamId = `team-${encodeURIComponent(team.name)}`;
+    const canDelete = provider !== 'codex';
+    const providerBadge = provider !== 'unknown' ? `<span class="agent-type">[${escapeHtml(provider)}]</span>` : '';
 
     return `
         <div class="team-card" id="${teamId}">
             <div class="team-header">
                 <div class="team-header-left">
-                    <div class="team-name">${escapeHtml(team.name)}</div>
+                    <div class="team-name">${escapeHtml(team.name)} ${providerBadge}</div>
                     <div class="team-created">创建时间: ${createdDate}</div>
                     ${projectCwd ? `<div class="team-cwd">工作目录: ${escapeHtml(projectCwd)}</div>` : ''}
                 </div>
-                <button class="team-delete-btn" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg> 清理</button>
+                ${canDelete ? `<button class="team-delete-btn" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg> 清理</button>` : ''}
             </div>
 
             <div class="team-section office-scene">

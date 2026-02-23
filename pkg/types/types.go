@@ -5,6 +5,7 @@ import "time"
 // TeamInfo represents a Claude agent team
 type TeamInfo struct {
 	Name          string      `json:"name"`
+	Provider      string      `json:"provider,omitempty"` // claude, codex
 	CreatedAt     time.Time   `json:"created_at"`
 	LeadSessionID string      `json:"lead_session_id,omitempty"`
 	ProjectCwd    string      `json:"project_cwd,omitempty"`
@@ -16,6 +17,7 @@ type TeamInfo struct {
 // AgentInfo represents an agent in a team
 type AgentInfo struct {
 	Name            string    `json:"name"`
+	Provider        string    `json:"provider,omitempty"` // claude, codex
 	AgentID         string    `json:"agent_id"`
 	AgentType       string    `json:"agent_type"`
 	Status          string    `json:"status"` // idle, working, completed
@@ -60,6 +62,7 @@ type ProcessInfo struct {
 	PID       int32     `json:"pid"`
 	Command   string    `json:"command"`
 	Team      string    `json:"team,omitempty"`
+	Provider  string    `json:"provider,omitempty"` // claude, codex
 	StartedAt time.Time `json:"started_at"`
 }
 

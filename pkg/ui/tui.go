@@ -84,10 +84,21 @@ var (
 )
 
 type model struct {
-	collector *monitor.Collector
-	state     types.MonitorState
-	width     int
-	height    int
+	collector      *monitor.Collector
+	state          types.MonitorState
+	width          int
+	height         int
+	providerFilter string
+	hideIdleAgents bool
+}
+
+type providerStats struct {
+	AllTeams     int
+	AllAgents    int
+	ClaudeTeams  int
+	ClaudeAgents int
+	CodexTeams   int
+	CodexAgents  int
 }
 
 type tickMsg time.Time
@@ -100,8 +111,10 @@ func tickCmd() tea.Cmd {
 
 func NewModel(collector *monitor.Collector) model {
 	return model{
-		collector: collector,
-		state:     collector.GetState(),
+		collector:      collector,
+		state:          collector.GetState(),
+		providerFilter: "all",
+		hideIdleAgents: true,
 	}
 }
 
@@ -118,6 +131,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			// Manual refresh
 			m.state = m.collector.GetState()
+		case "1", "a":
+			m.providerFilter = "all"
+		case "2", "c":
+			m.providerFilter = "claude"
+		case "3", "o":
+			m.providerFilter = "codex"
+		case "i":
+			m.hideIdleAgents = !m.hideIdleAgents
 		}
 
 	case tea.WindowSizeMsg:
@@ -135,26 +156,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	var b strings.Builder
+	teams, processes, stats := m.filteredState()
 
 	// Title
-	title := titleStyle.Render("🤖 Claude Agent Team 监控器")
+	title := titleStyle.Render("🤖 Claude + Codex Agent Team 监控器")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
 	// Last updated
 	lastUpdate := fmt.Sprintf("最后更新: %s", m.state.UpdatedAt.Format("15:04:05"))
 	b.WriteString(lipgloss.NewStyle().Faint(true).Render(lastUpdate))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Faint(true).Render(m.filterSummary(stats)))
 	b.WriteString("\n\n")
 
 	// Processes section
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 Claude 进程"))
-	b.WriteString(fmt.Sprintf(" (运行中: %d)\n", len(m.state.Processes)))
-	if len(m.state.Processes) == 0 {
-		b.WriteString(processStyle.Render("  未检测到 Claude 进程\n"))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 代理进程"))
+	b.WriteString(fmt.Sprintf(" (运行中: %d)\n", len(processes)))
+	if len(processes) == 0 {
+		b.WriteString(processStyle.Render("  未检测到代理进程\n"))
 	} else {
-		for _, proc := range m.state.Processes {
+		for _, proc := range processes {
 			uptime := time.Since(proc.StartedAt).Round(time.Second)
-			procInfo := fmt.Sprintf("  进程 ID: %d | 运行时间: %s", proc.PID, uptime)
+			provider := detectProcessProvider(proc)
+			procInfo := fmt.Sprintf("  进程 ID: %d | 来源: %s | 运行时间: %s", proc.PID, provider, uptime)
 			b.WriteString(processStyle.Render(procInfo))
 			b.WriteString("\n")
 		}
@@ -163,12 +188,12 @@ func (m model) View() string {
 
 	// Teams section
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("👥 活动团队"))
-	b.WriteString(fmt.Sprintf(" (共 %d 个)\n\n", len(m.state.Teams)))
+	b.WriteString(fmt.Sprintf(" (共 %d 个)\n\n", len(teams)))
 
-	if len(m.state.Teams) == 0 {
+	if len(teams) == 0 {
 		b.WriteString(teamStyle.Render("未找到活动团队"))
 	} else {
-		for _, team := range m.state.Teams {
+		for _, team := range teams {
 			teamContent := m.renderTeam(team)
 			b.WriteString(teamStyle.Render(teamContent))
 			b.WriteString("\n")
@@ -177,7 +202,7 @@ func (m model) View() string {
 
 	// Help
 	b.WriteString("\n")
-	help := lipgloss.NewStyle().Faint(true).Render("按 'r' 刷新 | 按 'q' 退出")
+	help := lipgloss.NewStyle().Faint(true).Render("按 '1/2/3' 切换筛选 | 按 'i' 切换空闲隐藏 | 按 'r' 刷新 | 按 'q' 退出")
 	b.WriteString(help)
 
 	return b.String()
@@ -186,7 +211,12 @@ func (m model) View() string {
 func (m model) renderTeam(team types.TeamInfo) string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("团队: %s", team.Name)))
+	provider := detectTeamProvider(team)
+	if provider != "unknown" {
+		b.WriteString(lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("团队: %s [%s]", team.Name, provider)))
+	} else {
+		b.WriteString(lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("团队: %s", team.Name)))
+	}
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("创建时间: %s", team.CreatedAt.Format("2006-01-02 15:04"))))
 	if team.ProjectCwd != "" {
@@ -195,26 +225,28 @@ func (m model) renderTeam(team types.TeamInfo) string {
 	}
 	b.WriteString("\n\n")
 
+	displayMembers := visibleMembers(team.Members, m.hideIdleAgents)
+
 	workingCount := 0
-	for _, agent := range team.Members {
+	for _, agent := range displayMembers {
 		if agent.Status == "working" {
 			workingCount++
 		}
 	}
 
-	tasksByOwner, unassignedTasks := narrative.GroupTasksByOwner(team.Members, team.Tasks)
+	tasksByOwner, unassignedTasks := narrative.GroupTasksByOwner(displayMembers, team.Tasks)
 
 	b.WriteString(officeSectionStyle.Render(
-		fmt.Sprintf("🏢 办公区实况 (%d 位同事, %d 位忙碌中)", len(team.Members), workingCount)))
+		fmt.Sprintf("🏢 办公区实况 (%d 位同事, %d 位忙碌中)", len(displayMembers), workingCount)))
 	b.WriteString("\n")
 	b.WriteString(officeHintStyle.Render("每位成员用“人话”同步当前状态、思路和工具动作。"))
 	b.WriteString("\n")
 
-	if len(team.Members) == 0 {
+	if len(displayMembers) == 0 {
 		b.WriteString(agentStyle.Render("  无成员"))
 		b.WriteString("\n")
 	} else {
-		for _, agent := range team.Members {
+		for _, agent := range displayMembers {
 			b.WriteString(m.renderAgentDesk(agent, tasksByOwner[agent.Name]))
 		}
 	}
@@ -224,6 +256,137 @@ func (m model) renderTeam(team types.TeamInfo) string {
 	}
 
 	return b.String()
+}
+
+func visibleMembers(members []types.AgentInfo, hideIdle bool) []types.AgentInfo {
+	if !hideIdle {
+		return append([]types.AgentInfo(nil), members...)
+	}
+
+	result := make([]types.AgentInfo, 0, len(members))
+	for _, member := range members {
+		if member.Status == "idle" {
+			continue
+		}
+		result = append(result, member)
+	}
+	return result
+}
+
+func (m model) filteredState() ([]types.TeamInfo, []types.ProcessInfo, providerStats) {
+	stats := providerStats{}
+	teams := make([]types.TeamInfo, 0, len(m.state.Teams))
+
+	for _, team := range m.state.Teams {
+		provider := detectTeamProvider(team)
+		members := visibleMembers(team.Members, m.hideIdleAgents)
+
+		if !shouldKeepTeam(team, members, m.hideIdleAgents) {
+			continue
+		}
+
+		stats.AllTeams++
+		stats.AllAgents += len(members)
+		switch provider {
+		case "claude":
+			stats.ClaudeTeams++
+			stats.ClaudeAgents += len(members)
+		case "codex":
+			stats.CodexTeams++
+			stats.CodexAgents += len(members)
+		}
+
+		if m.providerFilter != "all" && provider != m.providerFilter {
+			continue
+		}
+
+		teamCopy := team
+		teamCopy.Members = members
+		teams = append(teams, teamCopy)
+	}
+
+	processes := make([]types.ProcessInfo, 0, len(m.state.Processes))
+	for _, proc := range m.state.Processes {
+		provider := detectProcessProvider(proc)
+		if m.providerFilter != "all" && provider != m.providerFilter {
+			continue
+		}
+		processes = append(processes, proc)
+	}
+
+	return teams, processes, stats
+}
+
+func (m model) filterSummary(stats providerStats) string {
+	hideIdle := "开"
+	if !m.hideIdleAgents {
+		hideIdle = "关"
+	}
+
+	return fmt.Sprintf(
+		"筛选: [1]全部(team:%d,agent:%d) [2]Claude(team:%d,agent:%d) [3]Codex(team:%d,agent:%d) | 当前:%s | 自动隐藏空闲:%s",
+		stats.AllTeams,
+		stats.AllAgents,
+		stats.ClaudeTeams,
+		stats.ClaudeAgents,
+		stats.CodexTeams,
+		stats.CodexAgents,
+		strings.ToUpper(m.providerFilter),
+		hideIdle,
+	)
+}
+
+func shouldKeepTeam(team types.TeamInfo, members []types.AgentInfo, hideIdle bool) bool {
+	if !hideIdle {
+		return true
+	}
+
+	if len(members) > 0 {
+		return true
+	}
+
+	for _, task := range team.Tasks {
+		if strings.ToLower(strings.TrimSpace(task.Status)) != "completed" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func detectTeamProvider(team types.TeamInfo) string {
+	provider := strings.ToLower(strings.TrimSpace(team.Provider))
+	if provider == "claude" || provider == "codex" {
+		return provider
+	}
+
+	for _, member := range team.Members {
+		memberProvider := strings.ToLower(strings.TrimSpace(member.Provider))
+		if memberProvider == "claude" || memberProvider == "codex" {
+			return memberProvider
+		}
+	}
+
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(team.Name)), "codex-") {
+		return "codex"
+	}
+	return "unknown"
+}
+
+func detectProcessProvider(proc types.ProcessInfo) string {
+	provider := strings.ToLower(strings.TrimSpace(proc.Provider))
+	if provider == "claude" || provider == "codex" {
+		return provider
+	}
+
+	cmd := strings.ToLower(strings.TrimSpace(proc.Command))
+	if strings.Contains(cmd, "codex") {
+		return "codex"
+	}
+	if strings.Contains(cmd, "claude") {
+		return "claude"
+	}
+	return "unknown"
 }
 
 func (m model) renderAgentDesk(agent types.AgentInfo, tasks []types.TaskInfo) string {
