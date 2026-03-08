@@ -1,0 +1,43 @@
+{
+  "agents": {
+    "busy": {
+      "type": "image",
+      "path": "assets/agent-busy.png",
+      "fallback": "drawAgent"
+    },
+    "idle": {
+      "type": "image",
+      "path": "assets/agent-idle.png",
+      "fallback": "drawAgent"
+    }
+  },
+  "rooms": {
+    "office": {
+      "type": "image",
+      "path": "assets/office-room.png",
+      "fallback": "drawOffice"
+    }
+  },
+  "facilities": {
+    "restroom": {
+      "type": "image",
+      "path": "assets/restroom.png",
+      "fallback": "drawFacility"
+    },
+    "cafe": {
+      "type": "image",
+      "path": "assets/cafe.png",
+      "fallback": "drawFacility"
+    },
+    "gym": {
+      "type": "image",
+      "path": "assets/gym.png",
+      "fallback": "drawFacility"
+    },
+    "boss": {
+      "type": "image",
+      "path": "assets/boss-room.png",
+      "fallback": "drawFacility"
+    }
+  }
+}
