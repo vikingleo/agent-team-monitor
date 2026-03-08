@@ -1,9 +1,12 @@
+import { OfficeScene } from './scenes/OfficeScene.js';
+
 export const GameConfig = {
     type: Phaser.AUTO,
     parent: 'game-container',
     width: 1920,
     height: 1080,
     backgroundColor: '#f5f5f5',
+    scene: [OfficeScene],
     physics: {
         default: 'arcade',
         arcade: {
