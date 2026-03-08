@@ -28,7 +28,8 @@ export class LayoutManager {
         }
         // 大型公司
         else {
-            layout.bounds = { width: 1400 + Math.floor((teamCount - 5) / 2) * 300, height: 1000 };
+            const rows = Math.ceil(teamCount / 3);
+            layout.bounds = { width: 1600, height: 400 + rows * 350 };
             layout.facilities = this.getLargeCompanyFacilities();
             layout.teams = this.layoutLargeCompany(teams);
         }
@@ -66,18 +67,18 @@ export class LayoutManager {
     layoutLargeCompany(teams) {
         const positions = [];
         const cols = 3;
-        const startX = 150;
-        const startY = 100;
-        const spacingX = 350;
-        const spacingY = 300;
+        const startX = 200;
+        const startY = 200;
+        const spacingX = 450;  // 增加横向间距
+        const spacingY = 350;  // 增加纵向间距
 
         teams.forEach((team, i) => {
             const col = i % cols;
             const row = Math.floor(i / cols);
             positions.push({
                 name: team.name,
-                x: startX + col * spacingX + (Math.random() - 0.5) * 40,
-                y: startY + row * spacingY + (Math.random() - 0.5) * 40
+                x: startX + col * spacingX,
+                y: startY + row * spacingY
             });
         });
 
@@ -102,10 +103,10 @@ export class LayoutManager {
 
     getLargeCompanyFacilities() {
         return [
-            { type: 'restroom', x: 50, y: 50, width: 80, height: 100 },
-            { type: 'gym', x: 1100, y: 50, width: 150, height: 100 },
-            { type: 'cafe', x: 50, y: 850, width: 80, height: 100 },
-            { type: 'boss', x: 650, y: 450, width: 200, height: 150 }
+            { type: 'restroom', x: 50, y: 50, width: 100, height: 120 },
+            { type: 'gym', x: 1400, y: 50, width: 150, height: 120 },
+            { type: 'cafe', x: 50, y: 900, width: 100, height: 120 },
+            { type: 'boss', x: 700, y: 50, width: 200, height: 120 }
         ];
     }
 }

@@ -16,6 +16,11 @@ export const GameConfig = {
     scale: {
         mode: Phaser.Scale.RESIZE,
         autoCenter: Phaser.Scale.CENTER_BOTH
+    },
+    render: {
+        pixelArt: false,
+        antialias: true,
+        roundPixels: false
     }
 };
 
