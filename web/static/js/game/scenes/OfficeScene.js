@@ -105,6 +105,39 @@ export class OfficeScene extends Phaser.Scene {
         // 更新相机边界
         this.cameras.main.setBounds(0, 0, layout.bounds.width, layout.bounds.height);
 
+        // 创建区域划分（背景）
+        if (layout.zones) {
+            layout.zones.forEach(zoneData => {
+                // 区域背景
+                const zone = this.add.rectangle(
+                    zoneData.x + zoneData.width / 2,
+                    zoneData.y + zoneData.height / 2,
+                    zoneData.width,
+                    zoneData.height,
+                    zoneData.color,
+                    0.3
+                );
+                zone.setStrokeStyle(2, zoneData.color, 0.8);
+                zone.setDepth(-10);
+
+                // 区域标签
+                const label = this.add.text(
+                    zoneData.x + zoneData.width / 2,
+                    zoneData.y + 30,
+                    zoneData.name,
+                    {
+                        fontSize: '28px',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
+                        color: '#666666',
+                        fontStyle: 'bold',
+                        resolution: window.devicePixelRatio || 2  // 提高文字渲染分辨率
+                    }
+                );
+                label.setOrigin(0.5);
+                label.setDepth(-9);
+            });
+        }
+
         // 创建功能区
         layout.facilities.forEach(facilityData => {
             const facility = new FacilityZone(this, facilityData);
@@ -116,9 +149,9 @@ export class OfficeScene extends Phaser.Scene {
         state.teams.forEach(teamData => {
             const team = new Team(this, teamData);
 
-            // 添加 agents
-            if (teamData.agents) {
-                teamData.agents.forEach(agentData => {
+            // 添加 agents（使用 members 字段）
+            if (teamData.members) {
+                teamData.members.forEach(agentData => {
                     team.addAgent(agentData);
                 });
             }
@@ -126,14 +159,21 @@ export class OfficeScene extends Phaser.Scene {
             // 获取布局位置
             const teamLayout = layout.teams.find(t => t.name === teamData.name);
             if (teamLayout) {
-                team.create(teamLayout.x, teamLayout.y);
+                team.create(teamLayout.x, teamLayout.y, teamLayout.rotation);
             }
 
             this.teams.set(teamData.name, team);
         });
 
-        // 自动适配视角
-        this.fitCameraToContent();
+        // 设置相机显示整个场景
+        this.resetCameraToFullView();
+    }
+
+    resetCameraToFullView() {
+        const camera = this.cameras.main;
+        camera.setZoom(1);
+        const viewWidth = window.innerWidth - 490;  // 减去侧栏宽度
+        camera.centerOn(viewWidth / 2, window.innerHeight / 2);
     }
 
     applyChanges(changes) {
@@ -178,11 +218,11 @@ export class OfficeScene extends Phaser.Scene {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
         this.teams.forEach(team => {
-            if (team.office) {
-                minX = Math.min(minX, team.office.x);
-                minY = Math.min(minY, team.office.y);
-                maxX = Math.max(maxX, team.office.x + team.office.width);
-                maxY = Math.max(maxY, team.office.y + team.office.height);
+            if (team.desk) {
+                minX = Math.min(minX, team.desk.x - team.desk.width / 2);
+                minY = Math.min(minY, team.desk.y - team.desk.height / 2);
+                maxX = Math.max(maxX, team.desk.x + team.desk.width / 2);
+                maxY = Math.max(maxY, team.desk.y + team.desk.height / 2);
             }
         });
 

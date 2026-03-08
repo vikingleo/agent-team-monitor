@@ -1,0 +1,255 @@
+/* 右侧侧栏样式 */
+.sidebar {
+    position: fixed;
+    right: 0;
+    top: 0;
+    width: 490px;
+    height: 100vh;
+    background: #ffffff;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    z-index: 1000;
+    overflow: visible;
+}
+
+/* 团队标签栏 */
+.team-tabs {
+    width: 90px;
+    background: #f5f5f5;
+    border-right: 1px solid #e0e0e0;
+    overflow-y: auto;
+    overflow-x: visible;
+    position: relative;
+}
+
+.team-tab {
+    padding: 12px 8px;
+    cursor: pointer;
+    border-bottom: 1px solid #e0e0e0;
+    transition: all 0.3s ease;
+    text-align: center;
+    position: relative;
+    width: 90px;
+    background: #f5f5f5;
+    box-shadow: none;
+}
+
+.team-tab:hover {
+    background: #e8e8e8;
+    z-index: 1001;
+    position: absolute;
+    right: 0;
+    transform: translateX(-90px);
+    width: 180px;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+}
+
+.team-tab.active {
+    background: #ffffff;
+    border-right: 3px solid #4A90E2;
+}
+
+.team-tab-name {
+    font-size: 12px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 4px;
+    word-break: break-word;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.team-tab:hover .team-tab-name {
+    white-space: normal;
+    overflow: visible;
+}
+}
+
+.team-tab-count {
+    font-size: 11px;
+    color: #666;
+}
+
+/* 内容区域 */
+.sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.team-header {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.team-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.team-meta {
+    font-size: 12px;
+    color: #666;
+}
+
+/* Agent 卡片 */
+.agent-card {
+    background: #f9f9f9;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    transition: box-shadow 0.2s;
+}
+
+.agent-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.agent-card.working {
+    border-left: 4px solid #4CAF50;
+}
+
+.agent-card.idle {
+    border-left: 4px solid #9E9E9E;
+}
+
+.agent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.agent-name {
+    font-size: 14px;
+    font-weight: bold;
+    color: #333;
+}
+
+.agent-status {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: #e0e0e0;
+    color: #666;
+}
+
+.agent-status.working {
+    background: #C8E6C9;
+    color: #2E7D32;
+}
+
+.agent-status.idle {
+    background: #E0E0E0;
+    color: #757575;
+}
+
+.agent-action {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 8px;
+    font-style: italic;
+}
+
+.agent-thinking {
+    font-size: 12px;
+    color: #444;
+    background: #fff;
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    max-height: 100px;
+    overflow-y: auto;
+    line-height: 1.4;
+}
+
+.agent-todos {
+    margin-top: 8px;
+}
+
+.agent-todos-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #666;
+    margin-bottom: 4px;
+}
+
+.todo-item {
+    font-size: 11px;
+    color: #555;
+    padding: 4px 0;
+    display: flex;
+    align-items: center;
+}
+
+.todo-item.completed {
+    text-decoration: line-through;
+    color: #999;
+}
+
+.todo-status {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+.todo-status.completed {
+    background: #4CAF50;
+}
+
+.todo-status.in_progress {
+    background: #FFC107;
+}
+
+.todo-status.pending {
+    background: #E0E0E0;
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #999;
+}
+
+.empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+.empty-state-text {
+    font-size: 14px;
+}
+
+/* 滚动条样式 */
+.sidebar-content::-webkit-scrollbar,
+.team-tabs::-webkit-scrollbar,
+.agent-thinking::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar-content::-webkit-scrollbar-track,
+.team-tabs::-webkit-scrollbar-track,
+.agent-thinking::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb,
+.team-tabs::-webkit-scrollbar-thumb,
+.agent-thinking::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb:hover,
+.team-tabs::-webkit-scrollbar-thumb:hover,
+.agent-thinking::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}

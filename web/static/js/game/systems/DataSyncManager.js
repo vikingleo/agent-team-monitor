@@ -33,11 +33,20 @@ export class DataSyncManager {
     processChanges(newState) {
         if (!this.lastState) {
             this.scene.initializeState(newState);
+            this.emitStateUpdate(newState);
             return;
         }
 
         const changes = this.diffStates(this.lastState, newState);
         this.scene.applyChanges(changes);
+        this.emitStateUpdate(newState);
+    }
+
+    emitStateUpdate(state) {
+        // 通知 Game 实例状态已更新
+        if (this.scene.game && this.scene.game.events) {
+            this.scene.game.events.emit('state-updated', state);
+        }
     }
 
     diffStates(oldState, newState) {
@@ -64,13 +73,13 @@ export class DataSyncManager {
             }
         }
 
-        // 检测 agent 状态变化
+        // 检测 agent 状态变化（使用 members 而不是 agents）
         for (const [teamName, team] of newTeams) {
             const oldTeam = oldTeams.get(teamName);
             if (!oldTeam) continue;
 
-            const oldAgents = new Map((oldTeam.agents || []).map(a => [a.name, a]));
-            const newAgents = new Map((team.agents || []).map(a => [a.name, a]));
+            const oldAgents = new Map((oldTeam.members || []).map(a => [a.name, a]));
+            const newAgents = new Map((team.members || []).map(a => [a.name, a]));
 
             for (const [agentName, agent] of newAgents) {
                 const oldAgent = oldAgents.get(agentName);

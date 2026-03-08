@@ -3,8 +3,8 @@ import { OfficeScene } from './scenes/OfficeScene.js';
 export const GameConfig = {
     type: Phaser.AUTO,
     parent: 'game-container',
-    width: 1920,
-    height: 1080,
+    width: window.innerWidth - 490,  // 减去侧栏宽度 (400px) + tab 宽度 (90px)
+    height: window.innerHeight,
     backgroundColor: '#f5f5f5',
     scene: [OfficeScene],
     physics: {
@@ -15,7 +15,8 @@ export const GameConfig = {
     },
     scale: {
         mode: Phaser.Scale.RESIZE,
-        autoCenter: Phaser.Scale.CENTER_BOTH
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        resolution: window.devicePixelRatio || 1  // 修复模糊问题
     },
     render: {
         pixelArt: false,
