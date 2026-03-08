@@ -3,72 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Team 监控器</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Agent Team Monitor - 办公场景</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>
-                <span class="header-logo">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                </span>
-                Agent Team Monitor
-                <small class="header-subtitle">for Claude + Codex</small>
-            </h1>
-            <div class="header-info">
-                <span id="last-update">最后更新: --:--:--</span>
-                <span class="status-indicator" id="connection-status"><span class="status-dot"></span> 已连接</span>
-            </div>
-        </header>
+    <div id="game-container"></div>
 
-        <main>
-            <div class="view-controls">
-                <div class="filter-group" id="provider-filter">
-                    <button class="filter-chip active" data-provider="all">全部</button>
-                    <button class="filter-chip" data-provider="claude">
-                        Claude <span class="filter-chip-count" id="claude-filter-count">(team:0,agent:0)</span>
-                    </button>
-                    <button class="filter-chip" data-provider="codex">
-                        Codex <span class="filter-chip-count" id="codex-filter-count">(team:0,agent:0)</span>
-                    </button>
-                </div>
-                <label class="filter-toggle" for="hide-idle-toggle">
-                    <input id="hide-idle-toggle" type="checkbox" checked>
-                    自动隐藏空闲
-                </label>
-            </div>
+    <!-- Phaser 3 from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
-            <div class="tabs">
-                <button class="tab-button active" data-tab="teams">
-                    <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-                    活动团队 <span id="teams-count" class="badge">0</span>
-                </button>
-                <button class="tab-button" data-tab="processes">
-                    <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
-                    进程 <span id="processes-count" class="badge">0</span>
-                </button>
-            </div>
-
-            <div id="teams-tab" class="tab-content active">
-                <div id="teams-container">
-                    <p class="loading">加载中...</p>
-                </div>
-            </div>
-
-            <div id="processes-tab" class="tab-content">
-                <div id="processes-container">
-                    <p class="loading">加载中...</p>
-                </div>
-            </div>
-        </main>
-
-        <footer>
-            <p>每秒自动刷新 | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a> + <a href="https://openai.com" target="_blank">Codex</a> | <a href="https://github.com/vikingleo/agent-team-monitor" target="_blank">Github</a></p>
-        </footer>
-    </div>
-
-    <nav id="team-nav" class="team-nav"></nav>
-    <script src="js/app.js"></script>
+    <!-- Game modules -->
+    <script type="module" src="js/game/main.js"></script>
 </body>
 </html>
