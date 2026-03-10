@@ -14,15 +14,65 @@ let previousState = null; // 存储上一次渲染状态用于对比
 let latestRawState = null; // 存储后端原始状态
 let currentProviderFilter = 'all'; // all | claude | codex
 let hideIdleAgents = true;
+const THEME_STORAGE_KEY = 'atm-dashboard-theme';
+const DEFAULT_THEME = 'light';
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Agent Team Monitor initialized');
+    initThemeSwitcher();
     initTabs();
     initViewFilters();
     startAutoRefresh();
     fetchData();
 });
+
+function initThemeSwitcher() {
+    const buttons = document.querySelectorAll('[data-theme-choice]');
+    if (!buttons.length) {
+        return;
+    }
+
+    const initialTheme = getStoredTheme();
+    applyTheme(initialTheme);
+
+    buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+            const nextTheme = button.getAttribute('data-theme-choice') || DEFAULT_THEME;
+            applyTheme(nextTheme);
+        });
+    });
+}
+
+function getStoredTheme() {
+    try {
+        const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+        if (storedTheme === 'light' || storedTheme === 'dark') {
+            return storedTheme;
+        }
+    } catch (error) {
+        console.warn('Unable to read theme from localStorage:', error);
+    }
+
+    return DEFAULT_THEME;
+}
+
+function applyTheme(theme) {
+    const nextTheme = theme === 'dark' ? 'dark' : DEFAULT_THEME;
+    document.documentElement.setAttribute('data-theme', nextTheme);
+
+    try {
+        localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    } catch (error) {
+        console.warn('Unable to persist theme to localStorage:', error);
+    }
+
+    document.querySelectorAll('[data-theme-choice]').forEach((button) => {
+        const isActive = button.getAttribute('data-theme-choice') === nextTheme;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+}
 
 // Initialize tabs
 function initTabs() {
@@ -590,13 +640,17 @@ function isAgentInMotion(agent) {
 }
 
 function getAgentMotionLabel(agent, moving) {
+    const lastSignalText = formatRelativeTime(agent.last_active_time || agent.last_message_time);
+
     if (moving) {
+        if (lastSignalText) {
+            return `● 正在活动 · 最后活动 ${lastSignalText}`;
+        }
         return '● 正在活动';
     }
 
-    const lastActiveText = formatRelativeTime(agent.last_active_time);
-    if (lastActiveText) {
-        return `○ ${lastActiveText}`;
+    if (lastSignalText) {
+        return `○ 最后活动 ${lastSignalText}`;
     }
 
     return '○ 待命';
@@ -643,7 +697,7 @@ function buildAgentDialogues(agent, tasks) {
         }
     }
 
-    const lastActiveText = formatRelativeTime(agent.last_active_time);
+    const lastActiveText = formatRelativeTime(agent.last_active_time || agent.last_message_time);
     if (lastActiveText) {
         dialogues.push(`我最后一次动作是 ${lastActiveText}`);
     }

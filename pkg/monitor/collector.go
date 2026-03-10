@@ -220,7 +220,7 @@ func (c *Collector) collectClaudeTeams(homeDir string) []types.TeamInfo {
 		markTeamProvider(&teams[i], "claude")
 	}
 
-	return filterStaleTeams(teams, 30*time.Minute, tasksDir)
+	return filterStaleTeams(teams, time.Hour, tasksDir)
 }
 
 func (c *Collector) collectCodexTeams(homeDir string) []types.TeamInfo {
@@ -1165,25 +1165,26 @@ func filterStaleTeams(teams []types.TeamInfo, threshold time.Duration, tasksDir 
 
 // isTeamActive returns true if any member in the team has recent activity.
 func isTeamActive(team types.TeamInfo, now time.Time, threshold time.Duration) bool {
-	if len(team.Members) == 0 {
-		// No members — check if team was created recently
-		return now.Sub(team.CreatedAt) < threshold
+	lastActivity := latestTeamActivityTime(team)
+	if lastActivity.IsZero() {
+		return false
 	}
 
+	return now.Sub(lastActivity) < threshold
+}
+
+func latestTeamActivityTime(team types.TeamInfo) time.Time {
+	var latest time.Time
 	for _, agent := range team.Members {
-		// Check all available timestamps for recent activity
-		timestamps := []time.Time{
-			agent.LastActiveTime,
-			agent.LastMessageTime,
-			agent.LastActivity,
-			agent.JoinedAt,
-		}
-		for _, ts := range timestamps {
-			if !ts.IsZero() && now.Sub(ts) < threshold {
-				return true
+		for _, ts := range []time.Time{agent.LastActiveTime, agent.LastMessageTime, agent.LastActivity} {
+			if ts.IsZero() {
+				continue
+			}
+			if latest.IsZero() || ts.After(latest) {
+				latest = ts
 			}
 		}
 	}
 
-	return false
+	return latest
 }

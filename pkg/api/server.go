@@ -33,7 +33,8 @@ func NewServer(collector *monitor.Collector, addr string, staticFS fs.FS) *Serve
 	mux.HandleFunc("/api/health", s.handleHealth)
 
 	// Embedded static files
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	fileServer := http.FileServer(http.FS(staticFS))
+	mux.Handle("/", noCacheMiddleware(viewRouteMiddleware(fileServer)))
 
 	s.httpServer = &http.Server{
 		Addr:         addr,
@@ -119,6 +120,76 @@ func (s *Server) handleTeamAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func viewRouteMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if location, ok := resolveViewRedirect(r); ok {
+			http.Redirect(w, r, location, http.StatusFound)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func resolveViewRedirect(r *http.Request) (string, bool) {
+	view := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("view")))
+	if view == "" {
+		return "", false
+	}
+
+	switch view {
+	case "game":
+		if isDashboardPath(r.URL.Path) {
+			return buildViewURL(r, "/game/"), true
+		}
+	case "dark", "dashboard", "panel":
+		if isGamePath(r.URL.Path) {
+			return buildViewURL(r, "/"), true
+		}
+	}
+
+	return "", false
+}
+
+func isDashboardPath(path string) bool {
+	switch path {
+	case "/", "/index.html":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGamePath(path string) bool {
+	switch path {
+	case "/game", "/game/", "/game/index.html":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildViewURL(r *http.Request, target string) string {
+	query := r.URL.Query()
+	query.Del("view")
+	encoded := query.Encode()
+	if encoded == "" {
+		return target
+	}
+
+	return target + "?" + encoded
+}
+
+// noCacheMiddleware disables browser caching for embedded static files
+func noCacheMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // respondJSON writes a JSON response

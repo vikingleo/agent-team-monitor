@@ -1,28 +1,13 @@
-import { OfficeScene } from './scenes/OfficeScene.js';
+export const SidebarWidth = 490;
 
 export const GameConfig = {
-    type: Phaser.AUTO,
-    parent: 'game-container',
-    width: window.innerWidth - 490,  // 减去侧栏宽度 (400px) + tab 宽度 (90px)
-    height: window.innerHeight,
-    backgroundColor: '#f5f5f5',
-    scene: [OfficeScene],
-    physics: {
-        default: 'arcade',
-        arcade: {
-            debug: false
-        }
-    },
-    scale: {
-        mode: Phaser.Scale.RESIZE,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
-        resolution: window.devicePixelRatio || 1  // 修复模糊问题
-    },
-    render: {
-        pixelArt: false,
-        antialias: true,
-        roundPixels: false
-    }
+    width: () => Math.max(window.innerWidth - SidebarWidth, 320),
+    height: () => window.innerHeight,
+    backgroundColor: 0xf5f5f5,
+    resolution: () => Math.min(window.devicePixelRatio || 1, 1.5),
+    minZoom: 0.5,
+    maxZoom: 2,
+    pollInterval: 1000
 };
 
 export const Constants = {
@@ -33,5 +18,6 @@ export const Constants = {
     OFFICE_MIN_WIDTH: 200,
     OFFICE_MIN_HEIGHT: 150,
     ROOM_PADDING: 20,
-    CORRIDOR_WIDTH: 150
+    CORRIDOR_WIDTH: 150,
+    SIDEBAR_WIDTH: SidebarWidth
 };

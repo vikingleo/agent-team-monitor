@@ -43,9 +43,8 @@ export class DataSyncManager {
     }
 
     emitStateUpdate(state) {
-        // 通知 Game 实例状态已更新
-        if (this.scene.game && this.scene.game.events) {
-            this.scene.game.events.emit('state-updated', state);
+        if (typeof this.scene.emitStateUpdate === 'function') {
+            this.scene.emitStateUpdate(state);
         }
     }
 

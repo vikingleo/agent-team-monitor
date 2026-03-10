@@ -18,30 +18,26 @@
     background: #f5f5f5;
     border-right: 1px solid #e0e0e0;
     overflow-y: auto;
-    overflow-x: visible;
+    overflow-x: hidden;
     position: relative;
+    z-index: 1;
 }
 
 .team-tab {
     padding: 12px 8px;
     cursor: pointer;
     border-bottom: 1px solid #e0e0e0;
-    transition: all 0.3s ease;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
     text-align: center;
     position: relative;
     width: 90px;
+    box-sizing: border-box;
     background: #f5f5f5;
     box-shadow: none;
 }
 
 .team-tab:hover {
     background: #e8e8e8;
-    z-index: 1001;
-    position: absolute;
-    right: 0;
-    transform: translateX(-90px);
-    width: 180px;
-    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
 }
 
 .team-tab.active {
@@ -50,25 +46,50 @@
 }
 
 .team-tab-name {
+    display: block;
     font-size: 12px;
     font-weight: bold;
     color: #333;
     margin-bottom: 4px;
-    word-break: break-word;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.team-tab:hover .team-tab-name {
-    white-space: normal;
-    overflow: visible;
-}
+    line-height: 1.3;
 }
 
 .team-tab-count {
     font-size: 11px;
     color: #666;
+}
+
+.team-tab-preview {
+    position: absolute;
+    top: 0;
+    left: -180px;
+    width: 180px;
+    display: none;
+    z-index: 1002;
+    background: #e8e8e8;
+    border: 1px solid #d8d8d8;
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+    pointer-events: auto;
+}
+
+.team-tab-preview.visible {
+    display: block;
+}
+
+.team-tab-preview.active {
+    background: #ffffff;
+}
+
+.team-tab-preview .team-tab-name {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
 }
 
 /* 内容区域 */
@@ -154,6 +175,12 @@
     color: #666;
     margin-bottom: 8px;
     font-style: italic;
+}
+
+.agent-last-active {
+    font-size: 11px;
+    color: #777;
+    margin-bottom: 8px;
 }
 
 .agent-thinking {

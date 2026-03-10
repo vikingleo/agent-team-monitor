@@ -3,21 +3,40 @@ export class Sidebar {
         this.currentTeam = null;
         this.teams = [];
         this.container = null;
+        this.tabsContainer = null;
+        this.contentContainer = null;
+        this.previewContainer = null;
+        this.previewTeamName = null;
+        this.hidePreviewTimer = null;
         this.init();
     }
 
     init() {
-        // 创建侧栏 DOM
         this.container = document.createElement('div');
         this.container.className = 'sidebar';
         this.container.innerHTML = `
             <div class="team-tabs" id="team-tabs"></div>
             <div class="sidebar-content" id="sidebar-content"></div>
+            <div class="team-tab team-tab-preview" id="team-tab-preview"></div>
         `;
         document.body.appendChild(this.container);
 
-        this.tabsContainer = document.getElementById('team-tabs');
-        this.contentContainer = document.getElementById('sidebar-content');
+        this.tabsContainer = this.container.querySelector('#team-tabs');
+        this.contentContainer = this.container.querySelector('#sidebar-content');
+        this.previewContainer = this.container.querySelector('#team-tab-preview');
+
+        this.tabsContainer.addEventListener('scroll', () => this.hideTabPreview());
+        this.previewContainer.addEventListener('mouseenter', () => this.cancelHideTabPreview());
+        this.previewContainer.addEventListener('mouseleave', () => this.hideTabPreview());
+        this.previewContainer.addEventListener('click', () => {
+            if (!this.previewTeamName) {
+                return;
+            }
+            this.currentTeam = this.previewTeamName;
+            this.hideTabPreview();
+            this.renderTabs();
+            this.renderContent();
+        });
     }
 
     updateState(state) {
@@ -28,11 +47,15 @@ export class Sidebar {
 
         this.teams = state.teams;
 
-        // 如果没有选中团队，默认选中第一个
         if (!this.currentTeam && this.teams.length > 0) {
             this.currentTeam = this.teams[0].name;
         }
 
+        if (this.currentTeam && !this.teams.some(team => team.name === this.currentTeam)) {
+            this.currentTeam = this.teams.length > 0 ? this.teams[0].name : null;
+        }
+
+        this.hideTabPreview();
         this.renderTabs();
         this.renderContent();
     }
@@ -43,17 +66,63 @@ export class Sidebar {
         this.teams.forEach(team => {
             const tab = document.createElement('div');
             tab.className = `team-tab ${team.name === this.currentTeam ? 'active' : ''}`;
-            tab.innerHTML = `
-                <div class="team-tab-name">${this.truncateName(team.name)}</div>
-                <div class="team-tab-count">${team.members ? team.members.length : 0} 人</div>
-            `;
+            tab.title = team.name;
+            tab.innerHTML = this.renderTabMarkup(team);
+
+            tab.addEventListener('mouseenter', () => this.showTabPreview(tab, team));
+            tab.addEventListener('mouseleave', () => this.scheduleHideTabPreview());
             tab.addEventListener('click', () => {
                 this.currentTeam = team.name;
+                this.hideTabPreview();
                 this.renderTabs();
                 this.renderContent();
             });
+
             this.tabsContainer.appendChild(tab);
         });
+    }
+
+    renderTabMarkup(team) {
+        return `
+            <div class="team-tab-name">${team.name}</div>
+            <div class="team-tab-count">${team.members ? team.members.length : 0} 人</div>
+        `;
+    }
+
+    showTabPreview(tab, team) {
+        this.cancelHideTabPreview();
+
+        const tabRect = tab.getBoundingClientRect();
+        const sidebarRect = this.container.getBoundingClientRect();
+
+        this.previewTeamName = team.name;
+        this.previewContainer.className = `team-tab team-tab-preview visible ${team.name === this.currentTeam ? 'active' : ''}`;
+        this.previewContainer.innerHTML = this.renderTabMarkup(team);
+        this.previewContainer.style.top = `${tabRect.top - sidebarRect.top}px`;
+        this.previewContainer.style.minHeight = `${tabRect.height}px`;
+    }
+
+    scheduleHideTabPreview() {
+        this.cancelHideTabPreview();
+        this.hidePreviewTimer = window.setTimeout(() => this.hideTabPreview(), 80);
+    }
+
+    cancelHideTabPreview() {
+        if (this.hidePreviewTimer) {
+            clearTimeout(this.hidePreviewTimer);
+            this.hidePreviewTimer = null;
+        }
+    }
+
+    hideTabPreview() {
+        this.cancelHideTabPreview();
+        this.previewTeamName = null;
+        if (this.previewContainer) {
+            this.previewContainer.className = 'team-tab team-tab-preview';
+            this.previewContainer.innerHTML = '';
+            this.previewContainer.style.top = '';
+            this.previewContainer.style.minHeight = '';
+        }
     }
 
     renderContent() {
@@ -96,6 +165,8 @@ export class Sidebar {
 
         card.className = `agent-card ${isWorking ? 'working' : 'idle'}`;
 
+        const lastActivityText = this.formatRelativeTime(agent.last_active_time || agent.last_message_time || agent.last_activity);
+
         let html = `
             <div class="agent-header">
                 <div class="agent-name">${agent.name}</div>
@@ -103,9 +174,9 @@ export class Sidebar {
                     ${isWorking ? '工作中' : '空闲'}
                 </div>
             </div>
+            ${lastActivityText ? `<div class="agent-last-active">最后活动 ${lastActivityText}</div>` : ''}
         `;
 
-        // 当前操作
         if (agent.last_tool_use) {
             html += `
                 <div class="agent-action">
@@ -114,7 +185,6 @@ export class Sidebar {
             `;
         }
 
-        // 思考内容
         if (agent.last_thinking) {
             html += `
                 <div class="agent-thinking">
@@ -123,7 +193,6 @@ export class Sidebar {
             `;
         }
 
-        // 任务清单
         if (agent.todos && agent.todos.length > 0) {
             html += `
                 <div class="agent-todos">
@@ -148,6 +217,7 @@ export class Sidebar {
     }
 
     showEmptyState() {
+        this.hideTabPreview();
         this.tabsContainer.innerHTML = '';
         this.contentContainer.innerHTML = `
             <div class="empty-state">
@@ -157,9 +227,32 @@ export class Sidebar {
         `;
     }
 
-    truncateName(name) {
-        if (name.length <= 8) return name;
-        return name.substring(0, 7) + '...';
+    formatRelativeTime(timestamp) {
+        if (!timestamp) {
+            return '';
+        }
+
+        const target = new Date(timestamp);
+        if (Number.isNaN(target.getTime())) {
+            return '';
+        }
+
+        const diffSeconds = Math.max(0, Math.floor((Date.now() - target.getTime()) / 1000));
+        if (diffSeconds < 60) {
+            return `${diffSeconds}秒前`;
+        }
+
+        const diffMinutes = Math.floor(diffSeconds / 60);
+        if (diffMinutes < 60) {
+            return `${diffMinutes}分钟前`;
+        }
+
+        const diffHours = Math.floor(diffMinutes / 60);
+        if (diffHours < 24) {
+            return `${diffHours}小时前`;
+        }
+
+        return `${Math.floor(diffHours / 24)}天前`;
     }
 
     truncateText(text, maxLength) {
@@ -169,6 +262,7 @@ export class Sidebar {
     }
 
     destroy() {
+        this.hideTabPreview();
         if (this.container) {
             this.container.remove();
         }

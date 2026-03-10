@@ -65,7 +65,11 @@ make build
 ./bin/agent-team-monitor -web -provider codex
 ```
 
-浏览器打开 `http://localhost:3000`（默认是8080）。
+浏览器打开 `http://localhost:8080`。
+
+- 默认暗色监控面板：`/`
+- 办公场景游戏视图：`/game/`
+- 也支持单地址切换：`/?view=game`、`/game/?view=dark`
 
 ## API 接口
 
@@ -214,7 +218,11 @@ make build
 ./bin/agent-team-monitor -web -provider codex
 ```
 
-Open `http://localhost:3000` in your browser(The default port number is 8080).
+Open `http://localhost:8080` in your browser.
+
+- Dark dashboard: `/`
+- Office scene view: `/game/`
+- Single-address switching: `/?view=game`, `/game/?view=dark`
 
 ## API Endpoints
 

@@ -1,265 +1,244 @@
-import { ResourceManager } from '../systems/ResourceManager.js';
+import * as PIXI from '../../vendor/pixi.js';
 import { LayoutManager } from '../systems/LayoutManager.js';
 import { DataSyncManager } from '../systems/DataSyncManager.js';
 import { Team } from '../entities/Team.js';
 import { FacilityZone } from '../entities/FacilityZone.js';
+import { GameConfig } from '../config.js';
 
-export class OfficeScene extends Phaser.Scene {
-    constructor() {
-        super({ key: 'OfficeScene' });
-        this.resourceManager = null;
+export class OfficeScene {
+    constructor(app) {
+        this.app = app;
         this.layoutManager = null;
         this.dataSyncManager = null;
         this.teams = new Map();
         this.facilities = new Map();
+        this.zoneGraphics = [];
+        this.world = new PIXI.Container();
+        this.world.eventMode = 'static';
+        this.world.sortableChildren = true;
+        this.app.stage.addChild(this.world);
+        this.onStateUpdated = null;
+        this.currentState = null;
+        this.bounds = { width: GameConfig.width(), height: GameConfig.height() };
+        this.zoom = 1;
+        this.minZoom = GameConfig.minZoom;
+        this.maxZoom = GameConfig.maxZoom;
+        this.isDragging = false;
+        this.dragOrigin = null;
+        this.dragWorldOrigin = null;
+        this.lastTapTime = 0;
+        this.boundTick = this.tick.bind(this);
     }
 
-    preload() {
-        console.log('OfficeScene: preload');
-    }
-
-    async create() {
-        console.log('OfficeScene: create');
-
-        // 初始化资源管理器
-        this.resourceManager = new ResourceManager(this);
-        await this.resourceManager.init();
-
-        // 初始化布局管理器
+    async init() {
         this.layoutManager = new LayoutManager(this);
-
-        // 设置相机
-        this.cameras.main.setBounds(0, 0, 2400, 1600);
-        this.setupCameraControls();
-
-        // 创建图形对象（用于绘制）
-        this.graphics = this.add.graphics();
-
-        // 启动数据同步
+        this.setupInteractions();
+        this.app.ticker.add(this.boundTick);
         this.dataSyncManager = new DataSyncManager(this);
         this.dataSyncManager.start();
-
-        console.log('OfficeScene: ready');
+        console.log('OfficeScene: ready (PixiJS)');
     }
 
-    setupCameraControls() {
-        const camera = this.cameras.main;
+    setupInteractions() {
+        const view = this.app.view;
+        view.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            const nextZoom = event.deltaY > 0 ? this.zoom * 0.9 : this.zoom * 1.1;
+            this.setZoom(nextZoom, event.offsetX, event.offsetY);
+        }, { passive: false });
 
-        // 鼠标滚轮缩放
-        this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
-            const zoomFactor = deltaY > 0 ? 0.9 : 1.1;
-            const newZoom = Phaser.Math.Clamp(camera.zoom * zoomFactor, 0.5, 2);
-            camera.setZoom(newZoom);
-        });
-
-        // 鼠标拖拽
-        this.input.on('pointerdown', (pointer) => {
-            if (pointer.leftButtonDown()) {
-                this.isDragging = true;
-                this.dragStartX = pointer.x;
-                this.dragStartY = pointer.y;
-                this.cameraStartX = camera.scrollX;
-                this.cameraStartY = camera.scrollY;
+        view.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) {
+                return;
             }
-        });
 
-        this.input.on('pointermove', (pointer) => {
-            if (this.isDragging) {
-                const deltaX = (pointer.x - this.dragStartX) / camera.zoom;
-                const deltaY = (pointer.y - this.dragStartY) / camera.zoom;
-                camera.scrollX = this.cameraStartX - deltaX;
-                camera.scrollY = this.cameraStartY - deltaY;
+            const now = Date.now();
+            if (now - this.lastTapTime < 280) {
+                this.resetCameraToFullView();
+                this.lastTapTime = 0;
+                return;
             }
+            this.lastTapTime = now;
+
+            this.isDragging = true;
+            this.dragOrigin = { x: event.clientX, y: event.clientY };
+            this.dragWorldOrigin = { x: this.world.x, y: this.world.y };
         });
 
-        this.input.on('pointerup', () => {
+        window.addEventListener('pointermove', (event) => {
+            if (!this.isDragging || !this.dragOrigin || !this.dragWorldOrigin) {
+                return;
+            }
+            const deltaX = event.clientX - this.dragOrigin.x;
+            const deltaY = event.clientY - this.dragOrigin.y;
+            this.world.x = this.dragWorldOrigin.x + deltaX;
+            this.world.y = this.dragWorldOrigin.y + deltaY;
+            this.clampWorldPosition();
+        });
+
+        const stopDrag = () => {
             this.isDragging = false;
-        });
+            this.dragOrigin = null;
+            this.dragWorldOrigin = null;
+        };
 
-        // 双击重置视角
-        this.input.on('pointerdblclick', () => {
-            this.resetCamera();
-        });
+        window.addEventListener('pointerup', stopDrag);
+        window.addEventListener('pointercancel', stopDrag);
     }
 
-    resetCamera() {
-        const camera = this.cameras.main;
-        camera.setZoom(1);
-        camera.centerOn(800, 400);
+    tick(delta) {
+        this.teams.forEach((team) => team.update(delta));
     }
 
     initializeState(state) {
-        console.log('Initializing state:', state);
-
-        // 清空现有场景
+        this.currentState = state;
         this.clearScene();
 
         if (!state.teams || state.teams.length === 0) {
-            console.log('No teams to display');
+            this.emitStateUpdate(state);
             return;
         }
 
-        // 计算布局
         const layout = this.layoutManager.calculateLayout(state.teams);
+        this.bounds = layout.bounds;
+        this.drawZones(layout.zones || []);
 
-        // 更新相机边界
-        this.cameras.main.setBounds(0, 0, layout.bounds.width, layout.bounds.height);
-
-        // 创建区域划分（背景）
-        if (layout.zones) {
-            layout.zones.forEach(zoneData => {
-                // 区域背景
-                const zone = this.add.rectangle(
-                    zoneData.x + zoneData.width / 2,
-                    zoneData.y + zoneData.height / 2,
-                    zoneData.width,
-                    zoneData.height,
-                    zoneData.color,
-                    0.3
-                );
-                zone.setStrokeStyle(2, zoneData.color, 0.8);
-                zone.setDepth(-10);
-
-                // 区域标签
-                const label = this.add.text(
-                    zoneData.x + zoneData.width / 2,
-                    zoneData.y + 30,
-                    zoneData.name,
-                    {
-                        fontSize: '28px',
-                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
-                        color: '#666666',
-                        fontStyle: 'bold',
-                        resolution: window.devicePixelRatio || 2  // 提高文字渲染分辨率
-                    }
-                );
-                label.setOrigin(0.5);
-                label.setDepth(-9);
-            });
-        }
-
-        // 创建功能区
-        layout.facilities.forEach(facilityData => {
+        layout.facilities.forEach((facilityData) => {
             const facility = new FacilityZone(this, facilityData);
             facility.create();
             this.facilities.set(facilityData.type, facility);
         });
 
-        // 创建团队和 agents
-        state.teams.forEach(teamData => {
+        state.teams.forEach((teamData) => {
             const team = new Team(this, teamData);
-
-            // 添加 agents（使用 members 字段）
-            if (teamData.members) {
-                teamData.members.forEach(agentData => {
-                    team.addAgent(agentData);
-                });
-            }
-
-            // 获取布局位置
-            const teamLayout = layout.teams.find(t => t.name === teamData.name);
+            (teamData.members || []).forEach((agentData) => team.addAgent(agentData));
+            const teamLayout = layout.teams.find((item) => item.name === teamData.name);
             if (teamLayout) {
-                team.create(teamLayout.x, teamLayout.y, teamLayout.rotation);
+                team.create(teamLayout.x, teamLayout.y, teamLayout.rotation || 0);
             }
-
             this.teams.set(teamData.name, team);
         });
 
-        // 设置相机显示整个场景
         this.resetCameraToFullView();
-    }
-
-    resetCameraToFullView() {
-        const camera = this.cameras.main;
-        camera.setZoom(1);
-        const viewWidth = window.innerWidth - 490;  // 减去侧栏宽度
-        camera.centerOn(viewWidth / 2, window.innerHeight / 2);
+        this.emitStateUpdate(state);
     }
 
     applyChanges(changes) {
-        console.log('Applying changes:', changes);
+        if (changes.teamsAdded.length > 0 || changes.teamsRemoved.length > 0) {
+            this.dataSyncManager.lastState = null;
+            return;
+        }
 
-        // 处理新增团队
-        changes.teamsAdded.forEach(teamData => {
-            console.log('Adding team:', teamData.name);
-            // 重新计算布局并重建场景
-            this.dataSyncManager.lastState = null; // 强制完全重建
-        });
-
-        // 处理删除团队
-        changes.teamsRemoved.forEach(teamName => {
-            console.log('Removing team:', teamName);
-            const team = this.teams.get(teamName);
-            if (team) {
-                team.destroy();
-                this.teams.delete(teamName);
-            }
-        });
-
-        // 处理 agent 状态更新
-        changes.agentsUpdated.forEach(agentData => {
+        changes.agentsUpdated.forEach((agentData) => {
             const team = this.teams.get(agentData.teamName);
-            if (team) {
-                const agent = team.agents.get(agentData.name);
-                if (agent) {
-                    agent.updateState(agentData.status);
-                }
+            const agent = team?.agents.get(agentData.name);
+            if (agent) {
+                agent.updateState(agentData.status);
             }
         });
     }
 
-    fitCameraToContent() {
-        if (this.teams.size === 0) return;
+    emitStateUpdate(state) {
+        if (typeof this.onStateUpdated === 'function') {
+            this.onStateUpdated(state);
+        }
+    }
 
-        const camera = this.cameras.main;
-        const padding = 100;
+    drawZones(zones) {
+        this.zoneGraphics.forEach((item) => item.destroy());
+        this.zoneGraphics = [];
 
-        // 计算所有团队的边界
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        zones.forEach((zoneData) => {
+            const graphic = new PIXI.Graphics();
+            graphic.beginFill(zoneData.color, 0.25);
+            graphic.lineStyle(2, zoneData.color, 0.7);
+            graphic.drawRect(zoneData.x, zoneData.y, zoneData.width, zoneData.height);
+            graphic.endFill();
+            graphic.zIndex = -10;
+            this.world.addChild(graphic);
 
-        this.teams.forEach(team => {
-            if (team.desk) {
-                minX = Math.min(minX, team.desk.x - team.desk.width / 2);
-                minY = Math.min(minY, team.desk.y - team.desk.height / 2);
-                maxX = Math.max(maxX, team.desk.x + team.desk.width / 2);
-                maxY = Math.max(maxY, team.desk.y + team.desk.height / 2);
-            }
+            const label = new PIXI.Text(zoneData.name, {
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
+                fontSize: 28,
+                fontWeight: '700',
+                fill: 0x666666,
+                resolution: GameConfig.resolution()
+            });
+            label.anchor.set(0.5, 0.5);
+            label.position.set(zoneData.x + zoneData.width / 2, zoneData.y + 30);
+            label.zIndex = -9;
+            this.world.addChild(label);
+            this.zoneGraphics.push(graphic, label);
         });
+    }
 
-        const contentWidth = maxX - minX + padding * 2;
-        const contentHeight = maxY - minY + padding * 2;
-        const centerX = (minX + maxX) / 2;
-        const centerY = (minY + maxY) / 2;
+    setZoom(nextZoom, screenX = this.app.renderer.width / 2, screenY = this.app.renderer.height / 2) {
+        const clamped = Math.min(this.maxZoom, Math.max(this.minZoom, nextZoom));
+        const worldX = (screenX - this.world.x) / this.zoom;
+        const worldY = (screenY - this.world.y) / this.zoom;
 
-        // 计算合适的缩放比例
-        const zoomX = camera.width / contentWidth;
-        const zoomY = camera.height / contentHeight;
-        const zoom = Math.min(zoomX, zoomY, 1) * 0.9;
+        this.zoom = clamped;
+        this.world.scale.set(this.zoom);
+        this.world.x = screenX - worldX * this.zoom;
+        this.world.y = screenY - worldY * this.zoom;
+        this.clampWorldPosition();
+    }
 
-        camera.setZoom(zoom);
-        camera.centerOn(centerX, centerY);
+    resetCameraToFullView() {
+        this.zoom = 1;
+        this.world.scale.set(1);
+        this.world.x = 0;
+        this.world.y = 0;
+        this.centerWorld();
+    }
+
+    centerWorld() {
+        const viewportWidth = this.app.renderer.width;
+        const viewportHeight = this.app.renderer.height;
+        const contentWidth = this.bounds.width * this.zoom;
+        const contentHeight = this.bounds.height * this.zoom;
+
+        this.world.x = contentWidth < viewportWidth ? (viewportWidth - contentWidth) / 2 : 0;
+        this.world.y = contentHeight < viewportHeight ? (viewportHeight - contentHeight) / 2 : 0;
+        this.clampWorldPosition();
+    }
+
+    clampWorldPosition() {
+        const viewportWidth = this.app.renderer.width;
+        const viewportHeight = this.app.renderer.height;
+        const contentWidth = this.bounds.width * this.zoom;
+        const contentHeight = this.bounds.height * this.zoom;
+
+        const minX = Math.min(0, viewportWidth - contentWidth);
+        const minY = Math.min(0, viewportHeight - contentHeight);
+        const maxX = contentWidth < viewportWidth ? (viewportWidth - contentWidth) / 2 : 0;
+        const maxY = contentHeight < viewportHeight ? (viewportHeight - contentHeight) / 2 : 0;
+
+        this.world.x = Math.min(maxX, Math.max(minX, this.world.x));
+        this.world.y = Math.min(maxY, Math.max(minY, this.world.y));
+    }
+
+    handleResize() {
+        this.bounds.width = Math.max(this.bounds.width, this.app.renderer.width);
+        this.bounds.height = Math.max(this.bounds.height, this.app.renderer.height);
+        this.centerWorld();
     }
 
     clearScene() {
-        this.teams.forEach(team => team.destroy());
+        this.teams.forEach((team) => team.destroy());
         this.teams.clear();
-
-        this.facilities.forEach(facility => facility.destroy());
+        this.facilities.forEach((facility) => facility.destroy());
         this.facilities.clear();
-
-        if (this.graphics) {
-            this.graphics.clear();
-        }
+        this.zoneGraphics.forEach((item) => item.destroy());
+        this.zoneGraphics = [];
     }
 
-    update(time, delta) {
-        // 游戏循环
-    }
-
-    shutdown() {
+    destroy() {
         if (this.dataSyncManager) {
             this.dataSyncManager.stop();
         }
+        this.app.ticker.remove(this.boundTick);
         this.clearScene();
+        this.world.destroy({ children: true });
     }
 }

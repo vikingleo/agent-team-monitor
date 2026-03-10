@@ -93,7 +93,7 @@ export class LayoutManager {
                 name: team.name,
                 x: halfWidth * 0.3 + col * 300,
                 y: viewHeight * 0.25 + row * 250,
-                rotation: (Math.random() - 0.5) * 10,
+                rotation: this.getTeamRotation(team.name, 10),
                 isDesk: true,
                 zone: 'claude'
             });
@@ -107,7 +107,7 @@ export class LayoutManager {
                 name: team.name,
                 x: halfWidth * 1.2 + col * 300,
                 y: viewHeight * 0.25 + row * 250,
-                rotation: (Math.random() - 0.5) * 10,
+                rotation: this.getTeamRotation(team.name, 10),
                 isDesk: true,
                 zone: 'codex'
             });
@@ -128,7 +128,7 @@ export class LayoutManager {
                 name: team.name,
                 x: halfWidth * 0.3 + col * 350,
                 y: viewHeight * 0.2 + row * 280,
-                rotation: (Math.random() - 0.5) * 15,
+                rotation: this.getTeamRotation(team.name, 15),
                 isDesk: true,
                 zone: 'claude'
             });
@@ -142,13 +142,28 @@ export class LayoutManager {
                 name: team.name,
                 x: halfWidth * 1.3 + col * 350,
                 y: viewHeight * 0.2 + row * 280,
-                rotation: (Math.random() - 0.5) * 15,
+                rotation: this.getTeamRotation(team.name, 15),
                 isDesk: true,
                 zone: 'codex'
             });
         });
 
         return positions;
+    }
+
+    getTeamRotation(teamName, maxDegrees) {
+        const hash = this.hashString(teamName);
+        const normalized = (hash % 1000) / 999;
+        return (normalized - 0.5) * maxDegrees;
+    }
+
+    hashString(value) {
+        let hash = 0;
+        for (let index = 0; index < value.length; index += 1) {
+            hash = ((hash << 5) - hash) + value.charCodeAt(index);
+            hash |= 0;
+        }
+        return Math.abs(hash);
     }
 
     getSmallOfficeZones(viewWidth, viewHeight) {
