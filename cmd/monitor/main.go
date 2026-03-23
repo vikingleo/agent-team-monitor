@@ -16,16 +16,14 @@ import (
 )
 
 var (
-	webMode  = flag.Bool("web", false, "Run in web mode (HTTP server)")
-	webAddr  = flag.String("addr", ":8080", "Web server address")
-	provider = flag.String("provider", "both", "Data source provider: claude, codex, openclaw, both")
-	version  = flag.Bool("version", false, "Show version information")
+	webMode    = flag.Bool("web", false, "Run in web mode (HTTP server)")
+	webAddr    = flag.String("addr", ":8080", "Web server address")
+	provider   = flag.String("provider", "both", "Data source provider: claude, codex, openclaw, both")
+	version    = flag.Bool("version", false, "Show version information")
+	appVersion = "dev"
 )
 
-const (
-	appVersion = "1.4.0"
-	appName    = "Agent Team Monitor"
-)
+const appName = "Agent Team Monitor"
 
 func main() {
 	flag.Parse()

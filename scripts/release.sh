@@ -10,16 +10,16 @@ set -euo pipefail
 #
 # 前置条件:
 #   - 已安装 go、gh (GitHub CLI) 并已登录
-#   - GitHub remote 名称为 vikingleo（可通过环境变量 GH_REMOTE 覆盖）
+#   - 本地存在指向 ${GH_REPO} 的 GitHub remote（可通过环境变量 GH_REMOTE 覆盖）
 # ============================================================
 
 APP_NAME="agent-team-monitor"
-BUILD_DIR="bin"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD_DIR="${PROJECT_ROOT}/bin"
 ENTRY="./cmd/monitor"
 GH_REMOTE="${GH_REMOTE:-}"
 GH_REPO="${GH_REPO:-vikingleo/agent-team-monitor}"
 
-# 目标平台
 PLATFORMS=(
   "darwin/amd64"
   "darwin/arm64"
@@ -29,8 +29,16 @@ PLATFORMS=(
   "windows/arm64"
 )
 
+matches_github_repo() {
+  local url="$1"
+  local repo="${GH_REPO}"
+
+  [[ "${url}" =~ ^git@github\.com:${repo}(\.git)?$ ]] \
+    || [[ "${url}" =~ ^https://github\.com/${repo}(\.git)?$ ]] \
+    || [[ "${url}" =~ ^ssh://git@github\.com/${repo}(\.git)?$ ]]
+}
+
 resolve_git_remote() {
-  # User explicitly set GH_REMOTE
   if [[ -n "${GH_REMOTE}" ]]; then
     if git remote get-url "${GH_REMOTE}" >/dev/null 2>&1; then
       return
@@ -41,30 +49,50 @@ resolve_git_remote() {
     exit 1
   fi
 
-  # Prefer current branch upstream remote
-  local upstream
-  upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" 2>/dev/null || true)
-  if [[ -n "${upstream}" ]]; then
-    GH_REMOTE="${upstream%%/*}"
+  local remote
+  local remote_url
+  while IFS= read -r remote; do
+    remote_url="$(git remote get-url "${remote}" 2>/dev/null || true)"
+    if [[ -n "${remote_url}" ]] && matches_github_repo "${remote_url}"; then
+      GH_REMOTE="${remote}"
+      return
+    fi
+  done < <(git remote)
+
+  echo "错误: 未找到指向 GitHub 仓库 ${GH_REPO} 的 git remote"
+  echo "请先执行:"
+  echo "  git remote add github git@github.com:${GH_REPO}.git"
+  exit 1
+}
+
+ensure_release_source_version() {
+  local version="$1"
+  local source_file="${2}/cmd/monitor/main.go"
+
+  if rg -q '^var[[:space:]]+appVersion[[:space:]]*=' "${source_file}"; then
+    RELEASE_LDFLAGS="-s -w -X main.appVersion=${version}"
+    return
   fi
 
-  # Fallback to origin
-  if [[ -z "${GH_REMOTE}" ]] && git remote get-url origin >/dev/null 2>&1; then
-    GH_REMOTE="origin"
-  fi
+  echo ">> 旧版源码使用静态版本号，正在隔离构建目录中写入 ${version}..."
+  sed -i.bak "s/appVersion = \".*\"/appVersion = \"${version}\"/" "${source_file}"
+  rm -f "${source_file}.bak"
+  RELEASE_LDFLAGS="-s -w"
+}
 
-  # Last fallback: first available remote
-  if [[ -z "${GH_REMOTE}" ]]; then
-    GH_REMOTE=$(git remote | head -n 1 || true)
-  fi
+setup_release_worktree() {
+  RELEASE_WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/${APP_NAME}-release-XXXXXX")"
+  git worktree add --detach "${RELEASE_WORKTREE}" "${VERSION}" >/dev/null
+}
 
-  if [[ -z "${GH_REMOTE}" ]]; then
-    echo "错误: 未找到可用的 git remote，请先执行 git remote add"
-    exit 1
+cleanup() {
+  if [[ -n "${RELEASE_WORKTREE:-}" && -d "${RELEASE_WORKTREE}" ]]; then
+    git worktree remove --force "${RELEASE_WORKTREE}" >/dev/null 2>&1 || true
   fi
 }
 
 resolve_git_remote
+trap cleanup EXIT
 
 # ---- 版本号 ----
 if [[ $# -ge 1 ]]; then
@@ -84,33 +112,36 @@ echo "  远程仓库: ${GH_REMOTE} (${GH_REPO})"
 echo "=========================================="
 
 # ---- 确认 ----
-read -rp "确认发布? (y/N) " confirm
-if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-  echo "已取消"
-  exit 0
+if [[ -t 0 ]]; then
+  read -rp "确认发布? (y/N) " confirm
+  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo "已取消"
+    exit 0
+  fi
+else
+  echo ">> 非交互环境，跳过发布确认"
 fi
 
 # ---- 创建 tag（如果不存在）----
 if ! git rev-parse "$VERSION" >/dev/null 2>&1; then
   echo ">> 创建 tag: ${VERSION}"
-  git tag "$VERSION"
+  git tag -a "$VERSION" -m "Release ${VERSION}"
 fi
 
 # ---- 推送 tag ----
 echo ">> 推送 tag 到 ${GH_REMOTE}..."
 git push "$GH_REMOTE" "$VERSION"
 
-# ---- 更新 main.go 中的版本号 ----
 SEMVER="${VERSION#v}"
-if grep -q "appVersion" cmd/monitor/main.go; then
-  sed -i.bak "s/appVersion = \".*\"/appVersion = \"${SEMVER}\"/" cmd/monitor/main.go
-  rm -f cmd/monitor/main.go.bak
-fi
 
 # ---- 清理 & 构建 ----
 echo ">> 清理旧构建..."
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
+
+echo ">> 准备隔离构建目录..."
+setup_release_worktree
+ensure_release_source_version "${SEMVER}" "${RELEASE_WORKTREE}"
 
 echo ">> 开始多平台构建..."
 ARTIFACTS=()
@@ -122,7 +153,10 @@ for platform in "${PLATFORMS[@]}"; do
   fi
 
   echo "   构建 ${goos}/${goarch}..."
-  GOOS="$goos" GOARCH="$goarch" go build -ldflags="-s -w" -o "$output" "$ENTRY"
+  (
+    cd "${RELEASE_WORKTREE}"
+    GOOS="$goos" GOARCH="$goarch" go build -ldflags="${RELEASE_LDFLAGS}" -o "$output" "$ENTRY"
+  )
   ARTIFACTS+=("$output")
 done
 
@@ -147,13 +181,26 @@ NOTES="## ${VERSION}
 $(git log "$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD --oneline 2>/dev/null || echo "Initial release")
 "
 
-# ---- 创建 GitHub Release ----
-echo ">> 创建 GitHub Release: ${VERSION}..."
-gh release create "$VERSION" \
-  "${ARTIFACTS[@]}" \
-  --repo "$GH_REPO" \
-  --title "$VERSION" \
-  --notes "$NOTES"
+# ---- 创建 / 更新 GitHub Release ----
+if gh release view "$VERSION" --repo "$GH_REPO" >/dev/null 2>&1; then
+  echo ">> 更新 GitHub Release: ${VERSION}..."
+  gh release edit "$VERSION" \
+    --repo "$GH_REPO" \
+    --title "$VERSION" \
+    --notes "$NOTES"
+  gh release upload "$VERSION" \
+    "${ARTIFACTS[@]}" \
+    --repo "$GH_REPO" \
+    --clobber
+else
+  echo ">> 创建 GitHub Release: ${VERSION}..."
+  gh release create "$VERSION" \
+    "${ARTIFACTS[@]}" \
+    --repo "$GH_REPO" \
+    --title "$VERSION" \
+    --notes "$NOTES" \
+    --verify-tag
+fi
 
 echo ""
 echo "=========================================="

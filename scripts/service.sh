@@ -24,6 +24,7 @@ ACTION="${1:-status}"
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_BIN="${ATM_APP_BIN:-bin/agent-team-monitor}"
+APP_VERSION="${ATM_APP_VERSION:-$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)}"
 MODE="${ATM_MODE:-web}"
 PORT="${ATM_PORT:-8080}"
 PROVIDER="${ATM_PROVIDER:-both}"
@@ -39,7 +40,7 @@ build_binary() {
   echo ">> 构建中..."
   (
     cd "${ROOT_DIR}"
-    go build -o "${APP_BIN}" ./cmd/monitor
+    go build -ldflags "-X main.appVersion=${APP_VERSION}" -o "${APP_BIN}" ./cmd/monitor
   )
   echo ">> 构建完成: ${APP_BIN}"
 }

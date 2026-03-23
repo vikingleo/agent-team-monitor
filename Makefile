@@ -1,20 +1,23 @@
 .PHONY: build run run-web clean install test build-all build-windows release
 
+APP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+GO_LDFLAGS ?= -X main.appVersion=$(APP_VERSION)
+
 # Build the application
 build:
-	go build -o bin/agent-team-monitor ./cmd/monitor
+	go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor ./cmd/monitor
 
 # Run the application in TUI mode
 run:
-	go run ./cmd/monitor
+	go run -ldflags "$(GO_LDFLAGS)" ./cmd/monitor
 
 # Run the application in web mode
 run-web:
-	go run ./cmd/monitor -web
+	go run -ldflags "$(GO_LDFLAGS)" ./cmd/monitor -web
 
 # Run web mode with custom port
 run-web-port:
-	go run ./cmd/monitor -web -addr :$(PORT)
+	go run -ldflags "$(GO_LDFLAGS)" ./cmd/monitor -web -addr :$(PORT)
 
 # Install dependencies
 install:
@@ -31,17 +34,17 @@ test:
 
 # Build for multiple platforms
 build-all:
-	GOOS=darwin GOARCH=amd64 go build -o bin/agent-team-monitor-darwin-amd64 ./cmd/monitor
-	GOOS=darwin GOARCH=arm64 go build -o bin/agent-team-monitor-darwin-arm64 ./cmd/monitor
-	GOOS=linux GOARCH=amd64 go build -o bin/agent-team-monitor-linux-amd64 ./cmd/monitor
-	GOOS=linux GOARCH=arm64 go build -o bin/agent-team-monitor-linux-arm64 ./cmd/monitor
-	GOOS=windows GOARCH=amd64 go build -o bin/agent-team-monitor-windows-amd64.exe ./cmd/monitor
-	GOOS=windows GOARCH=arm64 go build -o bin/agent-team-monitor-windows-arm64.exe ./cmd/monitor
+	GOOS=darwin GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-darwin-amd64 ./cmd/monitor
+	GOOS=darwin GOARCH=arm64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-darwin-arm64 ./cmd/monitor
+	GOOS=linux GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-linux-amd64 ./cmd/monitor
+	GOOS=linux GOARCH=arm64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-linux-arm64 ./cmd/monitor
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-windows-amd64.exe ./cmd/monitor
+	GOOS=windows GOARCH=arm64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-windows-arm64.exe ./cmd/monitor
 
 # Build Windows binaries
 build-windows:
-	GOOS=windows GOARCH=amd64 go build -o bin/agent-team-monitor-windows-amd64.exe ./cmd/monitor
-	GOOS=windows GOARCH=arm64 go build -o bin/agent-team-monitor-windows-arm64.exe ./cmd/monitor
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-windows-amd64.exe ./cmd/monitor
+	GOOS=windows GOARCH=arm64 go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-windows-arm64.exe ./cmd/monitor
 
 # Install globally
 install-global: build

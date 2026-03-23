@@ -13,13 +13,14 @@ set -euo pipefail
 APP="bin/agent-team-monitor"
 MODE="${1:-tui}"
 PORT="${2:-8080}"
+APP_VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 
 # 项目根目录
 cd "$(dirname "$0")/.."
 
 # 构建
 echo ">> 构建中..."
-go build -o "$APP" ./cmd/monitor
+go build -ldflags "-X main.appVersion=${APP_VERSION}" -o "$APP" ./cmd/monitor
 echo ">> 构建完成"
 
 # 运行
