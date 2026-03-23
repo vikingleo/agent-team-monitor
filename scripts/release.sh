@@ -10,14 +10,14 @@ set -euo pipefail
 #
 # 前置条件:
 #   - 已安装 go、gh (GitHub CLI) 并已登录
-#   - 本地存在指向 ${GH_REPO} 的 GitHub remote（可通过环境变量 GH_REMOTE 覆盖）
+#   - 本地存在名为 github 的 GitHub remote
 # ============================================================
 
 APP_NAME="agent-team-monitor"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/bin"
 ENTRY="./cmd/monitor"
-GH_REMOTE="${GH_REMOTE:-}"
+GH_REMOTE="github"
 GH_REPO="${GH_REPO:-vikingleo/agent-team-monitor}"
 
 PLATFORMS=(
@@ -29,37 +29,12 @@ PLATFORMS=(
   "windows/arm64"
 )
 
-matches_github_repo() {
-  local url="$1"
-  local repo="${GH_REPO}"
-
-  [[ "${url}" =~ ^git@github\.com:${repo}(\.git)?$ ]] \
-    || [[ "${url}" =~ ^https://github\.com/${repo}(\.git)?$ ]] \
-    || [[ "${url}" =~ ^ssh://git@github\.com/${repo}(\.git)?$ ]]
-}
-
 resolve_git_remote() {
-  if [[ -n "${GH_REMOTE}" ]]; then
-    if git remote get-url "${GH_REMOTE}" >/dev/null 2>&1; then
-      return
-    fi
-    echo "错误: 指定的 GH_REMOTE 不存在: ${GH_REMOTE}"
-    echo "可用远程仓库:"
-    git remote -v || true
-    exit 1
+  if git remote get-url "${GH_REMOTE}" >/dev/null 2>&1; then
+    return
   fi
 
-  local remote
-  local remote_url
-  while IFS= read -r remote; do
-    remote_url="$(git remote get-url "${remote}" 2>/dev/null || true)"
-    if [[ -n "${remote_url}" ]] && matches_github_repo "${remote_url}"; then
-      GH_REMOTE="${remote}"
-      return
-    fi
-  done < <(git remote)
-
-  echo "错误: 未找到指向 GitHub 仓库 ${GH_REPO} 的 git remote"
+  echo "错误: 未找到名为 ${GH_REMOTE} 的 GitHub remote"
   echo "请先执行:"
   echo "  git remote add github git@github.com:${GH_REPO}.git"
   exit 1
