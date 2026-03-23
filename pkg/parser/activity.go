@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ActivityLog represents a single log entry from agent's jsonl file
@@ -40,7 +42,17 @@ type AgentActivity struct {
 	LastThinking   string    // Latest thinking/reasoning text
 	LastToolUse    string    // Latest tool being used (e.g., "Read", "Edit", "Bash")
 	LastToolDetail string    // Details about the tool use
+	LastResponse   string    // Latest full assistant response text
 	LastActiveTime time.Time // Last activity timestamp
+	RecentEvents   []AgentActivityEvent
+}
+
+// AgentActivityEvent represents a recent parsed event from an activity log.
+type AgentActivityEvent struct {
+	Kind      string
+	Title     string
+	Text      string
+	Timestamp time.Time
 }
 
 // AgentLogCandidate represents a candidate subagent log matched for a member
@@ -97,6 +109,8 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 		count = tailSize
 	}
 
+	recentEvents := make([]AgentActivityEvent, 0, 8)
+
 	// Process lines in reverse to get most recent activity first
 	for k := 0; k < count; k++ {
 		idx := (ringIdx - 1 - k) % tailSize
@@ -141,15 +155,15 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 			content = []ContentItem{singleContent}
 		}
 
-		// Extract thinking and tool use
+		// Extract thinking, tool use, and latest assistant response
 		for _, item := range content {
 			if item.Type == "text" && activity.LastThinking == "" {
-				// Clean up and truncate thinking text
-				text := strings.TrimSpace(item.Text)
-				if len(text) > 150 {
-					text = text[:150] + "..."
-				}
+				text := normalizeActivitySummary(item.Text, 150)
 				activity.LastThinking = text
+			}
+
+			if item.Type == "text" && activity.LastResponse == "" {
+				activity.LastResponse = sanitizeStructuredText(item.Text)
 			}
 
 			if item.Type == "tool_use" && activity.LastToolUse == "" {
@@ -159,13 +173,133 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 			}
 		}
 
-		// Stop if we have both thinking and tool use
-		if activity.LastThinking != "" && activity.LastToolUse != "" {
+		recentEvents = append(recentEvents, extractActivityEvents(content, timestamp)...)
+
+		// Stop if we have the core recent signals needed by the UI
+		if activity.LastThinking != "" && activity.LastToolUse != "" && activity.LastResponse != "" && len(recentEvents) >= 6 {
 			break
 		}
 	}
 
+	activity.RecentEvents = dedupeActivityEvents(recentEvents, 8)
+
 	return activity, nil
+}
+
+func normalizeActivityText(text string) string {
+	text = sanitizeStructuredText(text)
+	if text == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(text), " ")
+}
+
+func normalizeActivitySummary(text string, maxRunes int) string {
+	normalized := normalizeActivityText(text)
+	if normalized == "" || maxRunes <= 0 {
+		return normalized
+	}
+
+	if len(normalized) <= maxRunes {
+		return normalized
+	}
+
+	cut := maxRunes
+	for cut > 0 && !utf8.ValidString(normalized[:cut]) {
+		cut--
+	}
+	if cut <= 0 {
+		return "..."
+	}
+
+	return normalized[:cut] + "..."
+}
+
+func extractActivityEvents(content []ContentItem, timestamp time.Time) []AgentActivityEvent {
+	events := make([]AgentActivityEvent, 0, len(content))
+	for _, item := range content {
+		switch item.Type {
+		case "text":
+			text := normalizeActivityText(item.Text)
+			if text == "" {
+				continue
+			}
+			events = append(events, AgentActivityEvent{
+				Kind:      "response",
+				Title:     "输出",
+				Text:      text,
+				Timestamp: timestamp,
+			})
+		case "tool_use":
+			detail := strings.TrimSpace(item.Name)
+			if detail == "" {
+				continue
+			}
+			events = append(events, AgentActivityEvent{
+				Kind:      "tool",
+				Title:     "工具调用",
+				Text:      detail,
+				Timestamp: timestamp,
+			})
+		}
+	}
+	return events
+}
+
+func dedupeActivityEvents(events []AgentActivityEvent, limit int) []AgentActivityEvent {
+	if len(events) == 0 || limit <= 0 {
+		return nil
+	}
+
+	deduped := make([]AgentActivityEvent, 0, min(limit, len(events)))
+	seen := make(map[string]struct{})
+	for _, event := range events {
+		key := event.Kind + "\x00" + event.Text
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, event)
+		if len(deduped) >= limit {
+			break
+		}
+	}
+
+	return deduped
+}
+
+func sanitizeStructuredText(text string) string {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if trimmed == "" {
+		return ""
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	result := make([]string, 0, len(lines))
+	blankCount := 0
+	for _, line := range lines {
+		cleanLine := strings.TrimRightFunc(line, unicode.IsSpace)
+		if strings.TrimSpace(cleanLine) == "" {
+			blankCount++
+			if blankCount > 1 {
+				continue
+			}
+			result = append(result, "")
+			continue
+		}
+
+		blankCount = 0
+		result = append(result, cleanLine)
+	}
+
+	return strings.TrimSpace(strings.Join(result, "\n"))
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // extractToolDetail extracts details about tool usage

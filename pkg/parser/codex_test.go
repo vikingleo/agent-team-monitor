@@ -26,6 +26,10 @@ func TestDiscoverCodexSessions(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(content), 0644); err != nil {
 		t.Fatalf("write log failed: %v", err)
 	}
+	now := time.Now()
+	if err := os.Chtimes(logPath, now, now); err != nil {
+		t.Fatalf("Chtimes failed: %v", err)
+	}
 
 	sessions, err := DiscoverCodexSessions(filepath.Join(root, "sessions"), 24*time.Hour)
 	if err != nil {
@@ -59,6 +63,45 @@ func TestDiscoverCodexSessions(t *testing.T) {
 	}
 	if session.LastActiveAt.IsZero() {
 		t.Fatal("expected non-zero last active time")
+	}
+}
+
+func TestDiscoverCodexSessions_ExtractsSubagentDisplayNameFromSessionMeta(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions", "2026", "03", "22")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+
+	sessionID := "019d11a7-145a-7be3-bf0d-8939469bc2a2"
+	logPath := filepath.Join(sessionsDir, "rollout-2026-03-22T02-27-35-"+sessionID+".jsonl")
+	content := "" +
+		`{"timestamp":"2026-03-21T18:27:35.654Z","type":"session_meta","payload":{"id":"019d11a7-145a-7be3-bf0d-8939469bc2a2","forked_from_id":"019d11a5-206e-7d01-a409-3a117be44622","timestamp":"2026-03-21T18:27:35.645Z","cwd":"/home/test/work/demo","source":{"subagent":{"thread_spawn":{"parent_thread_id":"019d11a5-206e-7d01-a409-3a117be44622","depth":1,"agent_nickname":"Gauss","agent_role":"explorer"}}},"agent_nickname":"Gauss","agent_role":"explorer"}}` + "\n" +
+		`{"timestamp":"2026-03-21T18:27:36.000Z","type":"event_msg","payload":{"type":"user_message","message":"请排查 editor 页面问题"}}` + "\n" +
+		`{"timestamp":"2026-03-21T18:27:37.000Z","type":"event_msg","payload":{"type":"agent_message","message":"我先快速扫一遍相关文件。"}}` + "\n"
+
+	if err := os.WriteFile(logPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write log failed: %v", err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(logPath, now, now); err != nil {
+		t.Fatalf("Chtimes failed: %v", err)
+	}
+
+	sessions, err := DiscoverCodexSessions(filepath.Join(root, "sessions"), 24*time.Hour)
+	if err != nil {
+		t.Fatalf("DiscoverCodexSessions error: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+
+	session := sessions[0]
+	if session.DisplayName != "Gauss (explorer)" {
+		t.Fatalf("unexpected display name: %s", session.DisplayName)
+	}
+	if session.AgentRole != "explorer" {
+		t.Fatalf("unexpected agent role: %s", session.AgentRole)
 	}
 }
 

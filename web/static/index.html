@@ -19,14 +19,14 @@
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-    <div class="container">
+    <div class="container app-shell">
         <header>
             <h1>
                 <span class="header-logo">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                 </span>
                 Agent Team Monitor
-                <small class="header-subtitle">for Claude + Codex</small>
+                <small class="header-subtitle">for Claude + Codex + OpenClaw</small>
             </h1>
             <div class="header-info">
                 <div class="header-controls">
@@ -46,7 +46,7 @@
             </div>
         </header>
 
-        <main>
+        <main class="dashboard-main">
             <div class="view-controls">
                 <div class="filter-group" id="provider-filter">
                     <button class="filter-chip active" data-provider="all">全部</button>
@@ -55,6 +55,9 @@
                     </button>
                     <button class="filter-chip" data-provider="codex">
                         Codex <span class="filter-chip-count" id="codex-filter-count">(team:0,agent:0)</span>
+                    </button>
+                    <button class="filter-chip" data-provider="openclaw">
+                        OpenClaw <span class="filter-chip-count" id="openclaw-filter-count">(team:0,agent:0)</span>
                     </button>
                 </div>
                 <label class="filter-toggle" for="hide-idle-toggle">
@@ -88,11 +91,23 @@
         </main>
 
         <footer>
-            <p>每秒自动刷新 | <a href="/game/">办公场景视图</a> | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a> + <a href="https://openai.com" target="_blank">Codex</a> | <a href="https://github.com/vikingleo/agent-team-monitor" target="_blank">Github</a></p>
+            <p>每秒自动刷新 | <a href="/game/">办公场景视图</a> | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a> + <a href="https://openai.com" target="_blank">Codex</a> + <a href="https://github.com/openclaw/openclaw" target="_blank">OpenClaw</a> | <a href="https://github.com/vikingleo/agent-team-monitor" target="_blank">Github</a></p>
         </footer>
     </div>
 
     <nav id="team-nav" class="team-nav"></nav>
+    <div id="agent-detail-modal" class="agent-detail-modal" hidden>
+        <div class="agent-detail-backdrop" data-close-agent-detail="true"></div>
+        <div class="agent-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-detail-title">
+            <button class="agent-detail-close" type="button" data-close-agent-detail="true" aria-label="关闭详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 6L6 18"/>
+                    <path d="M6 6l12 12"/>
+                </svg>
+            </button>
+            <div id="agent-detail-content" class="agent-detail-content"></div>
+        </div>
+    </div>
     <script src="/js/app.js"></script>
 </body>
 </html>

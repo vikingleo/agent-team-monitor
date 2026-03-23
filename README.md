@@ -71,6 +71,42 @@ make build
 - 办公场景游戏视图：`/game/`
 - 也支持单地址切换：`/?view=game`、`/game/?view=dark`
 
+### Linux 部署脚本
+
+仓库内置了一个适合 Linux 服务器部署的管理脚本：
+
+```bash
+chmod +x ./scripts/service.sh
+
+# 默认以 web 模式启动，端口 8080
+./scripts/service.sh start
+
+# 查看状态
+./scripts/service.sh status
+
+# 快速重启
+./scripts/service.sh restart
+
+# 停止
+./scripts/service.sh stop
+
+# 查看日志
+./scripts/service.sh logs
+```
+
+也可以通过环境变量控制启动参数：
+
+```bash
+ATM_MODE=web ATM_PORT=3000 ATM_PROVIDER=both ./scripts/service.sh start
+```
+
+默认行为：
+
+- PID 文件：`run/agent-team-monitor.pid`
+- 标准日志：`logs/agent-team-monitor.out.log`
+- 错误日志：`logs/agent-team-monitor.err.log`
+- 启动前会自动执行 `go build`
+
 ## API 接口
 
 ```

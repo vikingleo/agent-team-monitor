@@ -27,6 +27,11 @@ class Game {
                     this.sidebar.updateState(state);
                 }
             };
+            this.scene.onActorSelected = ({ teamName, agentName }) => {
+                if (this.sidebar && typeof this.sidebar.focusAgent === 'function') {
+                    this.sidebar.focusAgent(teamName, agentName);
+                }
+            };
 
             await this.scene.init();
             window.addEventListener('resize', this.handleResize);

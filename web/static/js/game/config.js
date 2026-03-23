@@ -1,7 +1,7 @@
-export const SidebarWidth = 490;
+export const SidebarWidth = () => Math.round(window.innerWidth * 0.33);
 
 export const GameConfig = {
-    width: () => Math.max(window.innerWidth - SidebarWidth, 320),
+    width: () => Math.max(window.innerWidth - SidebarWidth(), 320),
     height: () => window.innerHeight,
     backgroundColor: 0xf5f5f5,
     resolution: () => Math.min(window.devicePixelRatio || 1, 1.5),

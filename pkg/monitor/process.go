@@ -17,7 +17,7 @@ func NewProcessMonitor() *ProcessMonitor {
 	return &ProcessMonitor{}
 }
 
-// FindProcesses finds all running Claude/Codex processes.
+// FindProcesses finds all running Claude/Codex/OpenClaw processes.
 func (pm *ProcessMonitor) FindProcesses(provider ProviderMode) ([]types.ProcessInfo, error) {
 	processes, err := process.Processes()
 	if err != nil {
@@ -39,6 +39,8 @@ func (pm *ProcessMonitor) FindProcesses(provider ProviderMode) ([]types.ProcessI
 			matchedProvider = "claude"
 		} else if mode.IncludesCodex() && isCodexProcess(cmdLower) {
 			matchedProvider = "codex"
+		} else if mode.IncludesOpenClaw() && isOpenClawProcess(cmdLower) {
+			matchedProvider = "openclaw"
 		}
 		if matchedProvider == "" {
 			continue
@@ -114,6 +116,33 @@ func isCodexProcess(cmdLower string) bool {
 	// Node wrappers often run codex from package paths.
 	if strings.Contains(exe, "node") {
 		return strings.Contains(cmdLower, "/codex ") || strings.Contains(cmdLower, "/codex/")
+	}
+
+	return false
+}
+
+func isOpenClawProcess(cmdLower string) bool {
+	parts := strings.Fields(cmdLower)
+	if len(parts) == 0 {
+		return false
+	}
+
+	exe := parts[0]
+	if exe == "openclaw" || strings.HasSuffix(exe, "/openclaw") {
+		return true
+	}
+
+	if strings.Contains(cmdLower, " openclaw ") ||
+		strings.Contains(cmdLower, "/openclaw ") ||
+		strings.Contains(cmdLower, "/openclaw/") ||
+		strings.Contains(cmdLower, "openclaw.mjs") {
+		return true
+	}
+
+	if strings.Contains(exe, "node") {
+		return strings.Contains(cmdLower, "/openclaw ") ||
+			strings.Contains(cmdLower, "/openclaw/") ||
+			strings.Contains(cmdLower, "openclaw.mjs")
 	}
 
 	return false

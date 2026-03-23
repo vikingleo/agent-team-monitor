@@ -93,12 +93,14 @@ type model struct {
 }
 
 type providerStats struct {
-	AllTeams     int
-	AllAgents    int
-	ClaudeTeams  int
-	ClaudeAgents int
-	CodexTeams   int
-	CodexAgents  int
+	AllTeams       int
+	AllAgents      int
+	ClaudeTeams    int
+	ClaudeAgents   int
+	CodexTeams     int
+	CodexAgents    int
+	OpenClawTeams  int
+	OpenClawAgents int
 }
 
 type tickMsg time.Time
@@ -137,6 +139,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.providerFilter = "claude"
 		case "3", "o":
 			m.providerFilter = "codex"
+		case "4":
+			m.providerFilter = "openclaw"
 		case "i":
 			m.hideIdleAgents = !m.hideIdleAgents
 		}
@@ -159,7 +163,7 @@ func (m model) View() string {
 	teams, processes, stats := m.filteredState()
 
 	// Title
-	title := titleStyle.Render("🤖 Claude + Codex Agent Team 监控器")
+	title := titleStyle.Render("🤖 Claude + Codex + OpenClaw Agent Team 监控器")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
@@ -202,7 +206,7 @@ func (m model) View() string {
 
 	// Help
 	b.WriteString("\n")
-	help := lipgloss.NewStyle().Faint(true).Render("按 '1/2/3' 切换筛选 | 按 'i' 切换空闲隐藏 | 按 'r' 刷新 | 按 'q' 退出")
+	help := lipgloss.NewStyle().Faint(true).Render("按 '1/2/3/4' 切换筛选 | 按 'i' 切换空闲隐藏 | 按 'r' 刷新 | 按 'q' 退出")
 	b.WriteString(help)
 
 	return b.String()
@@ -294,6 +298,9 @@ func (m model) filteredState() ([]types.TeamInfo, []types.ProcessInfo, providerS
 		case "codex":
 			stats.CodexTeams++
 			stats.CodexAgents += len(members)
+		case "openclaw":
+			stats.OpenClawTeams++
+			stats.OpenClawAgents += len(members)
 		}
 
 		if m.providerFilter != "all" && provider != m.providerFilter {
@@ -324,13 +331,15 @@ func (m model) filterSummary(stats providerStats) string {
 	}
 
 	return fmt.Sprintf(
-		"筛选: [1]全部(team:%d,agent:%d) [2]Claude(team:%d,agent:%d) [3]Codex(team:%d,agent:%d) | 当前:%s | 自动隐藏空闲:%s",
+		"筛选: [1]全部(team:%d,agent:%d) [2]Claude(team:%d,agent:%d) [3]Codex(team:%d,agent:%d) [4]OpenClaw(team:%d,agent:%d) | 当前:%s | 自动隐藏空闲:%s",
 		stats.AllTeams,
 		stats.AllAgents,
 		stats.ClaudeTeams,
 		stats.ClaudeAgents,
 		stats.CodexTeams,
 		stats.CodexAgents,
+		stats.OpenClawTeams,
+		stats.OpenClawAgents,
 		strings.ToUpper(m.providerFilter),
 		hideIdle,
 	)
@@ -356,13 +365,13 @@ func shouldKeepTeam(team types.TeamInfo, members []types.AgentInfo, hideIdle boo
 
 func detectTeamProvider(team types.TeamInfo) string {
 	provider := strings.ToLower(strings.TrimSpace(team.Provider))
-	if provider == "claude" || provider == "codex" {
+	if provider == "claude" || provider == "codex" || provider == "openclaw" {
 		return provider
 	}
 
 	for _, member := range team.Members {
 		memberProvider := strings.ToLower(strings.TrimSpace(member.Provider))
-		if memberProvider == "claude" || memberProvider == "codex" {
+		if memberProvider == "claude" || memberProvider == "codex" || memberProvider == "openclaw" {
 			return memberProvider
 		}
 	}
@@ -370,16 +379,22 @@ func detectTeamProvider(team types.TeamInfo) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(team.Name)), "codex-") {
 		return "codex"
 	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(team.Name)), "openclaw") {
+		return "openclaw"
+	}
 	return "unknown"
 }
 
 func detectProcessProvider(proc types.ProcessInfo) string {
 	provider := strings.ToLower(strings.TrimSpace(proc.Provider))
-	if provider == "claude" || provider == "codex" {
+	if provider == "claude" || provider == "codex" || provider == "openclaw" {
 		return provider
 	}
 
 	cmd := strings.ToLower(strings.TrimSpace(proc.Command))
+	if strings.Contains(cmd, "openclaw") {
+		return "openclaw"
+	}
 	if strings.Contains(cmd, "codex") {
 		return "codex"
 	}

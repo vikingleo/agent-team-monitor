@@ -22,7 +22,10 @@ export class DataSyncManager {
         try {
             const response = await fetch('/api/state?_ts=' + Date.now());
             if (!response.ok) throw new Error('API error');
-            const newState = await response.json();
+            const rawState = await response.json();
+            const newState = typeof this.scene.prepareState === 'function'
+                ? this.scene.prepareState(rawState)
+                : rawState;
             this.processChanges(newState);
             this.lastState = newState;
         } catch (error) {

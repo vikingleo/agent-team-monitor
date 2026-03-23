@@ -9,9 +9,10 @@ import (
 type ProviderMode string
 
 const (
-	ProviderClaude ProviderMode = "claude"
-	ProviderCodex  ProviderMode = "codex"
-	ProviderBoth   ProviderMode = "both"
+	ProviderClaude   ProviderMode = "claude"
+	ProviderCodex    ProviderMode = "codex"
+	ProviderOpenClaw ProviderMode = "openclaw"
+	ProviderBoth     ProviderMode = "both"
 )
 
 // ParseProviderMode parses provider mode from CLI/env inputs.
@@ -22,10 +23,10 @@ func ParseProviderMode(raw string) (ProviderMode, error) {
 	}
 
 	switch ProviderMode(value) {
-	case ProviderClaude, ProviderCodex, ProviderBoth:
+	case ProviderClaude, ProviderCodex, ProviderOpenClaw, ProviderBoth:
 		return ProviderMode(value), nil
 	default:
-		return "", fmt.Errorf("invalid provider %q (expected: claude, codex, both)", raw)
+		return "", fmt.Errorf("invalid provider %q (expected: claude, codex, openclaw, both)", raw)
 	}
 }
 
@@ -44,4 +45,8 @@ func (m ProviderMode) IncludesClaude() bool {
 
 func (m ProviderMode) IncludesCodex() bool {
 	return m == ProviderCodex || m == ProviderBoth
+}
+
+func (m ProviderMode) IncludesOpenClaw() bool {
+	return m == ProviderOpenClaw || m == ProviderBoth
 }

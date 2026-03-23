@@ -8,7 +8,8 @@ export class LayoutManager {
         const teamCount = teams.length;
 
         // 使用浏览器窗口尺寸，减去侧栏宽度
-        const viewWidth = window.innerWidth - 490;  // 减去侧栏 (400px) + tab (90px)
+        const sidebarWidth = this.getSidebarWidth();
+        const viewWidth = Math.max(window.innerWidth - sidebarWidth, 320);
         const viewHeight = window.innerHeight;
 
         const layout = {
@@ -20,45 +21,76 @@ export class LayoutManager {
 
         if (teamCount === 0) return layout;
 
-        // 将团队按类型分组（Claude 和 Codex）
-        const claudeTeams = teams.filter(t => this.isClaudeTeam(t));
-        const codexTeams = teams.filter(t => !this.isClaudeTeam(t));
+        // 将团队按类型分组（Claude / OpenClaw / 其他）
+        const claudeTeams = teams.filter(t => this.detectTeamProvider(t) === 'claude');
+        const openClawTeams = teams.filter(t => this.detectTeamProvider(t) === 'openclaw');
+        const codexTeams = teams.filter(t => {
+            const provider = this.detectTeamProvider(t);
+            return provider !== 'claude' && provider !== 'openclaw';
+        });
 
         // 开放式办公区布局 - 根据窗口大小调整
         if (teamCount <= 3) {
             layout.facilities = this.getSmallOfficeFacilities(viewWidth, viewHeight);
             layout.zones = this.getSmallOfficeZones(viewWidth, viewHeight);
-            layout.teams = this.layoutSmallOffice(claudeTeams, codexTeams, viewWidth, viewHeight);
+            layout.teams = this.layoutSmallOffice(claudeTeams, codexTeams, openClawTeams, viewWidth, viewHeight);
         }
         else if (teamCount <= 6) {
             layout.facilities = this.getMediumOfficeFacilities(viewWidth, viewHeight);
             layout.zones = this.getMediumOfficeZones(viewWidth, viewHeight);
-            layout.teams = this.layoutMediumOffice(claudeTeams, codexTeams, viewWidth, viewHeight);
+            layout.teams = this.layoutMediumOffice(claudeTeams, codexTeams, openClawTeams, viewWidth, viewHeight);
         }
         else {
             layout.facilities = this.getLargeOfficeFacilities(viewWidth, viewHeight);
             layout.zones = this.getLargeOfficeZones(viewWidth, viewHeight);
-            layout.teams = this.layoutLargeOffice(claudeTeams, codexTeams, viewWidth, viewHeight);
+            layout.teams = this.layoutLargeOffice(claudeTeams, codexTeams, openClawTeams, viewWidth, viewHeight);
         }
 
         return layout;
     }
 
+    getSidebarWidth() {
+        const rootStyles = window.getComputedStyle(document.body);
+        const cssWidth = parseFloat(rootStyles.getPropertyValue('--game-sidebar-width'));
+        if (Number.isFinite(cssWidth) && cssWidth > 0) {
+            return cssWidth;
+        }
+        return window.innerWidth * 0.33;
+    }
+
     // 判断是否为 Claude 团队（根据团队名称或其他特征）
     isClaudeTeam(team) {
-        const name = team.name.toLowerCase();
-        return name.includes('claude') || name.includes('anthropic');
+        return this.detectTeamProvider(team) === 'claude';
     }
 
-    layoutSmallOffice(claudeTeams, codexTeams, viewWidth, viewHeight) {
-        const positions = [];
-        const halfWidth = viewWidth / 2;
+    detectTeamProvider(team) {
+        const direct = String((team && team.provider) || '').toLowerCase();
+        if (direct === 'claude' || direct === 'codex' || direct === 'openclaw') {
+            return direct;
+        }
 
-        // Claude 区域（左侧）
+        const name = String((team && team.name) || '').toLowerCase();
+        if (name.includes('claude') || name.includes('anthropic')) {
+            return 'claude';
+        }
+        if (name.includes('openclaw')) {
+            return 'openclaw';
+        }
+        if (name.includes('codex')) {
+            return 'codex';
+        }
+
+        return 'unknown';
+    }
+
+    layoutSmallOffice(claudeTeams, codexTeams, openClawTeams, viewWidth, viewHeight) {
+        const positions = [];
+        const zoneWidth = viewWidth / 3;
+
         claudeTeams.forEach((team, i) => {
             positions.push({
                 name: team.name,
-                x: halfWidth * 0.5,
+                x: zoneWidth * 0.5,
                 y: viewHeight * 0.3 + i * 200,
                 rotation: 0,
                 isDesk: true,
@@ -66,11 +98,10 @@ export class LayoutManager {
             });
         });
 
-        // Codex 区域（右侧）
         codexTeams.forEach((team, i) => {
             positions.push({
                 name: team.name,
-                x: halfWidth * 1.5,
+                x: zoneWidth * 1.5,
                 y: viewHeight * 0.3 + i * 200,
                 rotation: 0,
                 isDesk: true,
@@ -78,20 +109,30 @@ export class LayoutManager {
             });
         });
 
+        openClawTeams.forEach((team, i) => {
+            positions.push({
+                name: team.name,
+                x: zoneWidth * 2.5,
+                y: viewHeight * 0.3 + i * 200,
+                rotation: 0,
+                isDesk: true,
+                zone: 'openclaw'
+            });
+        });
+
         return positions;
     }
 
-    layoutMediumOffice(claudeTeams, codexTeams, viewWidth, viewHeight) {
+    layoutMediumOffice(claudeTeams, codexTeams, openClawTeams, viewWidth, viewHeight) {
         const positions = [];
-        const halfWidth = viewWidth / 2;
+        const zoneWidth = viewWidth / 3;
 
-        // Claude 区域（左半部分）
         claudeTeams.forEach((team, i) => {
             const row = Math.floor(i / 2);
             const col = i % 2;
             positions.push({
                 name: team.name,
-                x: halfWidth * 0.3 + col * 300,
+                x: zoneWidth * 0.35 + col * 120,
                 y: viewHeight * 0.25 + row * 250,
                 rotation: this.getTeamRotation(team.name, 10),
                 isDesk: true,
@@ -99,13 +140,12 @@ export class LayoutManager {
             });
         });
 
-        // Codex 区域（右半部分）
         codexTeams.forEach((team, i) => {
             const row = Math.floor(i / 2);
             const col = i % 2;
             positions.push({
                 name: team.name,
-                x: halfWidth * 1.2 + col * 300,
+                x: zoneWidth * 1.35 + col * 120,
                 y: viewHeight * 0.25 + row * 250,
                 rotation: this.getTeamRotation(team.name, 10),
                 isDesk: true,
@@ -113,20 +153,32 @@ export class LayoutManager {
             });
         });
 
+        openClawTeams.forEach((team, i) => {
+            const row = Math.floor(i / 2);
+            const col = i % 2;
+            positions.push({
+                name: team.name,
+                x: zoneWidth * 2.35 + col * 120,
+                y: viewHeight * 0.25 + row * 250,
+                rotation: this.getTeamRotation(team.name, 10),
+                isDesk: true,
+                zone: 'openclaw'
+            });
+        });
+
         return positions;
     }
 
-    layoutLargeOffice(claudeTeams, codexTeams, viewWidth, viewHeight) {
+    layoutLargeOffice(claudeTeams, codexTeams, openClawTeams, viewWidth, viewHeight) {
         const positions = [];
-        const halfWidth = viewWidth / 2;
+        const zoneWidth = viewWidth / 3;
 
-        // Claude 区域（左半部分）
         claudeTeams.forEach((team, i) => {
             const row = Math.floor(i / 2);
             const col = i % 2;
             positions.push({
                 name: team.name,
-                x: halfWidth * 0.3 + col * 350,
+                x: zoneWidth * 0.35 + col * 130,
                 y: viewHeight * 0.2 + row * 280,
                 rotation: this.getTeamRotation(team.name, 15),
                 isDesk: true,
@@ -134,17 +186,29 @@ export class LayoutManager {
             });
         });
 
-        // Codex 区域（右半部分）
         codexTeams.forEach((team, i) => {
             const row = Math.floor(i / 2);
             const col = i % 2;
             positions.push({
                 name: team.name,
-                x: halfWidth * 1.3 + col * 350,
+                x: zoneWidth * 1.35 + col * 130,
                 y: viewHeight * 0.2 + row * 280,
                 rotation: this.getTeamRotation(team.name, 15),
                 isDesk: true,
                 zone: 'codex'
+            });
+        });
+
+        openClawTeams.forEach((team, i) => {
+            const row = Math.floor(i / 2);
+            const col = i % 2;
+            positions.push({
+                name: team.name,
+                x: zoneWidth * 2.35 + col * 130,
+                y: viewHeight * 0.2 + row * 280,
+                rotation: this.getTeamRotation(team.name, 15),
+                isDesk: true,
+                zone: 'openclaw'
             });
         });
 
@@ -167,26 +231,29 @@ export class LayoutManager {
     }
 
     getSmallOfficeZones(viewWidth, viewHeight) {
-        const halfWidth = viewWidth / 2;
+        const zoneWidth = viewWidth / 3;
         return [
-            { name: 'Claude 区', x: 50, y: 50, width: halfWidth - 100, height: viewHeight - 100, color: 0xE8F4F8 },
-            { name: 'Codex 区', x: halfWidth + 50, y: 50, width: halfWidth - 100, height: viewHeight - 100, color: 0xFFF4E6 }
+            { name: 'Claude 区', x: 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xE8F4F8 },
+            { name: 'Codex 区', x: zoneWidth + 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xFFF4E6 },
+            { name: 'OpenClaw 区', x: zoneWidth * 2 + 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xEAF8EA }
         ];
     }
 
     getMediumOfficeZones(viewWidth, viewHeight) {
-        const halfWidth = viewWidth / 2;
+        const zoneWidth = viewWidth / 3;
         return [
-            { name: 'Claude 区', x: 50, y: 50, width: halfWidth - 100, height: viewHeight - 100, color: 0xE8F4F8 },
-            { name: 'Codex 区', x: halfWidth + 50, y: 50, width: halfWidth - 100, height: viewHeight - 100, color: 0xFFF4E6 }
+            { name: 'Claude 区', x: 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xE8F4F8 },
+            { name: 'Codex 区', x: zoneWidth + 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xFFF4E6 },
+            { name: 'OpenClaw 区', x: zoneWidth * 2 + 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xEAF8EA }
         ];
     }
 
     getLargeOfficeZones(viewWidth, viewHeight) {
-        const halfWidth = viewWidth / 2;
+        const zoneWidth = viewWidth / 3;
         return [
-            { name: 'Claude 区', x: 50, y: 50, width: halfWidth - 100, height: viewHeight - 100, color: 0xE8F4F8 },
-            { name: 'Codex 区', x: halfWidth + 50, y: 50, width: halfWidth - 100, height: viewHeight - 100, color: 0xFFF4E6 }
+            { name: 'Claude 区', x: 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xE8F4F8 },
+            { name: 'Codex 区', x: zoneWidth + 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xFFF4E6 },
+            { name: 'OpenClaw 区', x: zoneWidth * 2 + 30, y: 50, width: zoneWidth - 60, height: viewHeight - 100, color: 0xEAF8EA }
         ];
     }
 

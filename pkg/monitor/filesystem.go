@@ -17,17 +17,20 @@ type FileSystemMonitorOptions struct {
 	Provider ProviderMode
 }
 
-// FileSystemMonitor monitors Claude/Codex runtime directories.
+// FileSystemMonitor monitors Claude/Codex/OpenClaw runtime directories.
 type FileSystemMonitor struct {
-	watcher          *fsnotify.Watcher
-	provider         ProviderMode
-	claudeDir        string
-	teamsDir         string
-	tasksDir         string
-	projectsDir      string
-	codexDir         string
-	codexSessionsDir string
-	onChange         func(event fsnotify.Event)
+	watcher                *fsnotify.Watcher
+	provider               ProviderMode
+	claudeDir              string
+	teamsDir               string
+	tasksDir               string
+	projectsDir            string
+	codexDir               string
+	codexSessionsDir       string
+	openClawDir            string
+	openClawAgentsDir      string
+	openClawSubdirsWatched bool
+	onChange               func(event fsnotify.Event)
 }
 
 // NewFileSystemMonitor creates a new filesystem monitor
@@ -59,6 +62,10 @@ func NewFileSystemMonitor(options FileSystemMonitorOptions, onChange func(event 
 	if provider.IncludesCodex() {
 		fsm.codexDir = filepath.Join(homeDir, ".codex")
 		fsm.codexSessionsDir = filepath.Join(fsm.codexDir, "sessions")
+	}
+	if provider.IncludesOpenClaw() {
+		fsm.openClawDir = filepath.Join(homeDir, ".openclaw")
+		fsm.openClawAgentsDir = filepath.Join(fsm.openClawDir, "agents")
 	}
 
 	return fsm, nil
@@ -117,6 +124,22 @@ func (fsm *FileSystemMonitor) ensureRootsWatched() error {
 			return err
 		}
 		fsm.watchSubdirectories(fsm.codexSessionsDir)
+	}
+
+	if fsm.provider.IncludesOpenClaw() {
+		if err := os.MkdirAll(fsm.openClawAgentsDir, 0755); err != nil {
+			return err
+		}
+		if err := fsm.addWatch(fsm.openClawDir); err != nil {
+			return err
+		}
+		if err := fsm.addWatch(fsm.openClawAgentsDir); err != nil {
+			return err
+		}
+		if !fsm.openClawSubdirsWatched {
+			fsm.watchSubdirectories(fsm.openClawDir)
+			fsm.openClawSubdirsWatched = true
+		}
 	}
 
 	return nil

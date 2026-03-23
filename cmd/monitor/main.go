@@ -18,7 +18,7 @@ import (
 var (
 	webMode  = flag.Bool("web", false, "Run in web mode (HTTP server)")
 	webAddr  = flag.String("addr", ":8080", "Web server address")
-	provider = flag.String("provider", "both", "Data source provider: claude, codex, both")
+	provider = flag.String("provider", "both", "Data source provider: claude, codex, openclaw, both")
 	version  = flag.Bool("version", false, "Show version information")
 )
 

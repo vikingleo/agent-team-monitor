@@ -20,13 +20,25 @@ type CodexSessionDiscovery struct {
 	SessionID        string
 	SessionPath      string
 	Cwd              string
+	DisplayName      string
+	AgentRole        string
 	StartedAt        time.Time
 	LastActiveAt     time.Time
 	LastUserMessage  string
 	LastAgentMessage string
+	FullAgentMessage string
 	LastReasoning    string
 	LastToolUse      string
 	LastToolDetail   string
+	RecentEvents     []CodexSessionEvent
+}
+
+// CodexSessionEvent is a recent structured event extracted from a codex session log.
+type CodexSessionEvent struct {
+	Kind      string
+	Title     string
+	Text      string
+	Timestamp time.Time
 }
 
 type codexLogEntry struct {
@@ -59,9 +71,25 @@ type codexTurnContextPayload struct {
 }
 
 type codexSessionMetaPayload struct {
-	ID        string `json:"id"`
-	Timestamp string `json:"timestamp"`
-	Cwd       string `json:"cwd"`
+	ID            string                 `json:"id"`
+	Timestamp     string                 `json:"timestamp"`
+	Cwd           string                 `json:"cwd"`
+	AgentNickname string                 `json:"agent_nickname"`
+	AgentRole     string                 `json:"agent_role"`
+	Source        codexSessionMetaSource `json:"source"`
+}
+
+type codexSessionMetaSource struct {
+	Subagent codexSessionMetaSubagent `json:"subagent"`
+}
+
+type codexSessionMetaSubagent struct {
+	ThreadSpawn codexSessionThreadSpawn `json:"thread_spawn"`
+}
+
+type codexSessionThreadSpawn struct {
+	AgentNickname string `json:"agent_nickname"`
+	AgentRole     string `json:"agent_role"`
 }
 
 // DiscoverCodexSessions scans ~/.codex/sessions and returns recent session activity.
@@ -103,7 +131,7 @@ func DiscoverCodexSessions(sessionsDir string, maxAge time.Duration) ([]CodexSes
 		if session.StartedAt.IsZero() {
 			session.StartedAt = info.ModTime()
 		}
-		if session.LastActiveAt.IsZero() {
+		if session.LastActiveAt.IsZero() || info.ModTime().After(session.LastActiveAt) {
 			session.LastActiveAt = info.ModTime()
 		}
 		if maxAge > 0 && now.Sub(session.LastActiveAt) > maxAge {
@@ -166,6 +194,8 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 		count = codexSessionTailLines
 	}
 
+	recentEvents := make([]CodexSessionEvent, 0, 8)
+
 	for k := 0; k < count; k++ {
 		idx := (ringIdx - 1 - k) % codexSessionTailLines
 		if idx < 0 {
@@ -177,7 +207,8 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 			continue
 		}
 
-		if ts := parseCodexTimestamp(entry.Timestamp); !ts.IsZero() {
+		ts := parseCodexTimestamp(entry.Timestamp)
+		if !ts.IsZero() {
 			if result.LastActiveAt.IsZero() || ts.After(result.LastActiveAt) {
 				result.LastActiveAt = ts
 			}
@@ -204,13 +235,40 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 				if result.LastUserMessage == "" {
 					result.LastUserMessage = normalizeCodexText(payload.Message, 120)
 				}
+				if text := sanitizeCodexStructuredText(payload.Message); text != "" {
+					recentEvents = append(recentEvents, CodexSessionEvent{
+						Kind:      "task",
+						Title:     "用户请求",
+						Text:      text,
+						Timestamp: ts,
+					})
+				}
 			case "agent_message":
 				if result.LastAgentMessage == "" {
 					result.LastAgentMessage = normalizeCodexText(payload.Message, 150)
 				}
+				if result.FullAgentMessage == "" {
+					result.FullAgentMessage = sanitizeCodexStructuredText(payload.Message)
+				}
+				if text := sanitizeCodexStructuredText(payload.Message); text != "" {
+					recentEvents = append(recentEvents, CodexSessionEvent{
+						Kind:      "response",
+						Title:     "输出",
+						Text:      text,
+						Timestamp: ts,
+					})
+				}
 			case "agent_reasoning":
 				if result.LastReasoning == "" {
 					result.LastReasoning = normalizeCodexText(payload.Text, 150)
+				}
+				if text := sanitizeCodexStructuredText(payload.Text); text != "" {
+					recentEvents = append(recentEvents, CodexSessionEvent{
+						Kind:      "thinking",
+						Title:     "思路",
+						Text:      text,
+						Timestamp: ts,
+					})
 				}
 			}
 		case "response_item":
@@ -222,6 +280,22 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 			if payload.Type == "function_call" && result.LastToolUse == "" {
 				result.LastToolUse = strings.TrimSpace(payload.Name)
 				result.LastToolDetail = summarizeCodexToolArguments(payload.Arguments)
+			}
+
+			if payload.Type == "function_call" {
+				text := strings.TrimSpace(payload.Name)
+				detail := summarizeCodexToolArguments(payload.Arguments)
+				if detail != "" {
+					text = strings.TrimSpace(text + " · " + detail)
+				}
+				if text != "" {
+					recentEvents = append(recentEvents, CodexSessionEvent{
+						Kind:      "tool",
+						Title:     "工具调用",
+						Text:      text,
+						Timestamp: ts,
+					})
+				}
 				continue
 			}
 
@@ -236,8 +310,25 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 					}
 				}
 			}
+
+			if payload.Type == "message" && payload.Role == "assistant" {
+				fullText := collectCodexAssistantMessage(payload.Content)
+				if result.FullAgentMessage == "" && fullText != "" {
+					result.FullAgentMessage = fullText
+				}
+				if fullText != "" {
+					recentEvents = append(recentEvents, CodexSessionEvent{
+						Kind:      "response",
+						Title:     "输出",
+						Text:      fullText,
+						Timestamp: ts,
+					})
+				}
+			}
 		}
 	}
+
+	result.RecentEvents = dedupeCodexEvents(recentEvents, 10)
 
 	return result, nil
 }
@@ -257,6 +348,42 @@ func applyCodexSessionMeta(target *CodexSessionDiscovery, payload json.RawMessag
 	if target.StartedAt.IsZero() {
 		target.StartedAt = parseCodexTimestamp(meta.Timestamp)
 	}
+
+	nickname := strings.TrimSpace(meta.AgentNickname)
+	if nickname == "" {
+		nickname = strings.TrimSpace(meta.Source.Subagent.ThreadSpawn.AgentNickname)
+	}
+
+	role := strings.TrimSpace(meta.AgentRole)
+	if role == "" {
+		role = strings.TrimSpace(meta.Source.Subagent.ThreadSpawn.AgentRole)
+	}
+
+	if target.DisplayName == "" {
+		target.DisplayName = formatCodexDisplayName(nickname, role)
+	}
+	if target.AgentRole == "" {
+		target.AgentRole = role
+	}
+}
+
+func formatCodexDisplayName(nickname, role string) string {
+	nickname = strings.TrimSpace(nickname)
+	role = strings.TrimSpace(role)
+	if nickname == "" {
+		return ""
+	}
+	if role == "" {
+		return nickname
+	}
+
+	lowerNickname := strings.ToLower(nickname)
+	lowerRole := strings.ToLower(role)
+	if strings.Contains(lowerNickname, "("+lowerRole+")") {
+		return nickname
+	}
+
+	return nickname + " (" + role + ")"
 }
 
 func parseCodexTimestamp(raw string) time.Time {
@@ -277,7 +404,7 @@ func extractCodexSessionID(path string) string {
 }
 
 func normalizeCodexText(raw string, maxRunes int) string {
-	text := strings.TrimSpace(raw)
+	text := sanitizeCodexStructuredText(raw)
 	if text == "" {
 		return ""
 	}
@@ -323,4 +450,75 @@ func summarizeCodexToolArguments(arguments string) string {
 	sort.Strings(keys)
 	first := keys[0]
 	return normalizeCodexText(fmt.Sprintf("%s=%v", first, payload[first]), 96)
+}
+
+func collectCodexAssistantMessage(content []codexResponseMessagePart) string {
+	parts := make([]string, 0, len(content))
+	for _, part := range content {
+		if part.Type != "output_text" {
+			continue
+		}
+		text := sanitizeCodexStructuredText(part.Text)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func dedupeCodexEvents(events []CodexSessionEvent, limit int) []CodexSessionEvent {
+	if len(events) == 0 || limit <= 0 {
+		return nil
+	}
+
+	deduped := make([]CodexSessionEvent, 0, minCodex(limit, len(events)))
+	seen := make(map[string]struct{})
+	for _, event := range events {
+		key := event.Kind + "\x00" + event.Text
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, event)
+		if len(deduped) >= limit {
+			break
+		}
+	}
+
+	return deduped
+}
+
+func minCodex(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func sanitizeCodexStructuredText(text string) string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if text == "" {
+		return ""
+	}
+
+	lines := strings.Split(text, "\n")
+	result := make([]string, 0, len(lines))
+	blankCount := 0
+	for _, line := range lines {
+		cleanLine := strings.TrimRight(line, " \t")
+		if strings.TrimSpace(cleanLine) == "" {
+			blankCount++
+			if blankCount > 1 {
+				continue
+			}
+			result = append(result, "")
+			continue
+		}
+
+		blankCount = 0
+		result = append(result, cleanLine)
+	}
+
+	return strings.TrimSpace(strings.Join(result, "\n"))
 }

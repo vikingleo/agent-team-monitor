@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/liaoweijun/agent-team-monitor/pkg/narrative"
@@ -39,6 +41,8 @@ var discoveryMetricsLoggingEnabled = readBoolEnv("ATM_DISCOVERY_METRICS", false)
 const projectDiscoveryMaxAge = 2 * time.Hour
 const codexSessionDiscoveryMaxAge = 8 * time.Hour
 const codexWorkingRecentThreshold = 2 * time.Minute
+const openClawSessionDiscoveryMaxAge = 8 * time.Hour
+const openClawWorkingRecentThreshold = 2 * time.Minute
 const discoveryMetricsLogInterval = 30 * time.Second
 const discoveryMetricsSlowThreshold = 500 * time.Millisecond
 
@@ -158,6 +162,10 @@ func (c *Collector) updateState() {
 		codexTeams := c.collectCodexTeams(homeDir)
 		allTeams = append(allTeams, codexTeams...)
 	}
+	if c.provider.IncludesOpenClaw() {
+		openClawTeams := c.collectOpenClawTeams(homeDir)
+		allTeams = append(allTeams, openClawTeams...)
+	}
 
 	// Update state
 	c.state.Teams = allTeams
@@ -231,8 +239,37 @@ func (c *Collector) collectCodexTeams(homeDir string) []types.TeamInfo {
 		return []types.TeamInfo{}
 	}
 
+	return c.buildCodexTeams(discovered, time.Now())
+}
+
+func (c *Collector) collectOpenClawTeams(homeDir string) []types.TeamInfo {
+	agentsDir := filepath.Join(homeDir, ".openclaw", "agents")
+	discovered, err := parser.DiscoverOpenClawSessions(agentsDir, openClawSessionDiscoveryMaxAge)
+	if err != nil {
+		log.Printf("Error discovering openclaw sessions: %v", err)
+		discovered = nil
+	}
+
+	stateDir := filepath.Join(homeDir, ".openclaw")
+	subagentRuns, runsErr := parser.DiscoverOpenClawSubagentRuns(stateDir, openClawSessionDiscoveryMaxAge)
+	if runsErr != nil {
+		log.Printf("Error discovering openclaw subagent runs: %v", runsErr)
+	}
+
+	if len(discovered) == 0 && len(subagentRuns) == 0 {
+		return []types.TeamInfo{}
+	}
+
 	now := time.Now()
-	teams := make([]types.TeamInfo, 0, len(discovered))
+	team := types.TeamInfo{
+		Name:      "openclaw",
+		Provider:  "openclaw",
+		CreatedAt: now,
+		Members:   make([]types.AgentInfo, 0, len(discovered)),
+		Tasks:     []types.TaskInfo{},
+	}
+	memberKeys := make(map[string]struct{}, len(discovered)+len(subagentRuns))
+
 	for _, session := range discovered {
 		lastActive := session.LastActiveAt
 		if lastActive.IsZero() {
@@ -247,52 +284,148 @@ func (c *Collector) collectCodexTeams(homeDir string) []types.TeamInfo {
 			createdAt = now
 		}
 
+		if team.CreatedAt.IsZero() || createdAt.Before(team.CreatedAt) {
+			team.CreatedAt = createdAt
+		}
+
+		if team.ProjectCwd == "" && session.Cwd != "" {
+			team.ProjectCwd = session.Cwd
+		}
+
 		status := "idle"
-		if !lastActive.IsZero() && now.Sub(lastActive) <= codexWorkingRecentThreshold {
+		if !lastActive.IsZero() && now.Sub(lastActive) <= openClawWorkingRecentThreshold {
 			status = "working"
 		}
 
-		messageSummary := session.LastAgentMessage
-		latestMessage := session.LastAgentMessage
-		if messageSummary == "" {
-			messageSummary = session.LastUserMessage
-		}
-		if latestMessage == "" {
-			latestMessage = session.LastUserMessage
-		}
+		currentTask := firstNonEmpty(
+			session.LastUserMessage,
+			session.Label,
+			session.DisplayName,
+		)
+		latestMessage := firstNonEmpty(session.LastAgentMessage, session.LastUserMessage)
+		messageSummary := firstNonEmpty(session.LastAgentMessage, session.LastUserMessage, session.Label)
 
-		agent := types.AgentInfo{
-			Name:            "codex-agent",
-			Provider:        "codex",
+		agentName := firstNonEmpty(session.DisplayName, session.Label, "openclaw-"+session.AgentID)
+		agentType := firstNonEmpty(session.AgentID, "openclaw")
+		memberKey := agentName + "\x00" + session.SessionID
+
+		team.Members = append(team.Members, types.AgentInfo{
+			Name:            agentName,
+			Provider:        "openclaw",
 			AgentID:         session.SessionID,
-			AgentType:       "codex",
+			AgentType:       agentType,
 			Status:          status,
-			CurrentTask:     session.LastUserMessage,
+			CurrentTask:     currentTask,
 			LastActivity:    lastActive,
 			Cwd:             session.Cwd,
 			LatestMessage:   latestMessage,
 			MessageSummary:  messageSummary,
+			LatestResponse:  session.FullAgentMessage,
 			LastMessageTime: lastActive,
 			LastThinking:    session.LastReasoning,
 			LastToolUse:     session.LastToolUse,
 			LastToolDetail:  session.LastToolDetail,
 			LastActiveTime:  lastActive,
-		}
-
-		team := types.TeamInfo{
-			Name:          codexTeamName(session.SessionID, session.Cwd),
-			Provider:      "codex",
-			CreatedAt:     createdAt,
-			LeadSessionID: session.SessionID,
-			ProjectCwd:    session.Cwd,
-			Members:       []types.AgentInfo{agent},
-			Tasks:         []types.TaskInfo{},
-		}
-		c.buildAgentNarratives(&team)
-		teams = append(teams, team)
+			RecentEvents:    convertOpenClawEvents(session.RecentEvents),
+		})
+		memberKeys[memberKey] = struct{}{}
 	}
 
-	return teams
+	for _, run := range subagentRuns {
+		sessionAgentID, childToken := parseOpenClawChildSessionKey(run.ChildSessionKey)
+		agentName := firstNonEmpty(run.Label, childToken, "openclaw-subagent")
+		agentType := firstNonEmpty(sessionAgentID, "openclaw-subagent")
+		agentID := firstNonEmpty(run.ChildSessionKey, run.RunID)
+		memberKey := agentName + "\x00" + agentID
+		if _, exists := memberKeys[memberKey]; exists {
+			continue
+		}
+
+		lastActive := resolveOpenClawRunLastActive(run)
+		createdAt := resolveOpenClawRunCreatedAt(run)
+		if team.CreatedAt.IsZero() || (!createdAt.IsZero() && createdAt.Before(team.CreatedAt)) {
+			team.CreatedAt = createdAt
+		}
+		if team.ProjectCwd == "" && run.WorkspaceDir != "" {
+			team.ProjectCwd = run.WorkspaceDir
+		}
+
+		status := "idle"
+		if !run.EndedAt.IsZero() {
+			status = "completed"
+		} else if !lastActive.IsZero() && now.Sub(lastActive) <= openClawWorkingRecentThreshold {
+			status = "working"
+		}
+
+		currentTask := firstNonEmpty(run.Task, run.Label, childToken)
+		messageSummary := firstNonEmpty(run.Label, run.Task)
+
+		team.Members = append(team.Members, types.AgentInfo{
+			Name:            agentName,
+			Provider:        "openclaw",
+			AgentID:         agentID,
+			AgentType:       agentType,
+			Status:          status,
+			CurrentTask:     currentTask,
+			LastActivity:    lastActive,
+			Cwd:             run.WorkspaceDir,
+			LatestMessage:   "",
+			MessageSummary:  messageSummary,
+			LatestResponse:  "",
+			LastMessageTime: lastActive,
+			LastThinking:    "",
+			LastToolUse:     "",
+			LastToolDetail:  "",
+			LastActiveTime:  lastActive,
+			RecentEvents:    nil,
+		})
+		memberKeys[memberKey] = struct{}{}
+	}
+
+	sort.SliceStable(team.Members, func(i, j int) bool {
+		return team.Members[i].LastActiveTime.After(team.Members[j].LastActiveTime)
+	})
+	c.buildAgentNarratives(&team)
+	return []types.TeamInfo{team}
+}
+
+func parseOpenClawChildSessionKey(sessionKey string) (agentID, childToken string) {
+	parts := strings.Split(strings.TrimSpace(sessionKey), ":")
+	if len(parts) < 4 {
+		return "", strings.TrimSpace(sessionKey)
+	}
+
+	if len(parts) >= 2 && parts[0] == "agent" {
+		agentID = strings.TrimSpace(parts[1])
+	}
+
+	lastToken := strings.TrimSpace(parts[len(parts)-1])
+	if lastToken != "" {
+		childToken = lastToken
+	} else {
+		childToken = strings.TrimSpace(sessionKey)
+	}
+	return agentID, childToken
+}
+
+func resolveOpenClawRunLastActive(run parser.OpenClawSubagentRunRecord) time.Time {
+	if !run.EndedAt.IsZero() {
+		return run.EndedAt
+	}
+	if !run.StartedAt.IsZero() {
+		return run.StartedAt
+	}
+	return run.CreatedAt
+}
+
+func resolveOpenClawRunCreatedAt(run parser.OpenClawSubagentRunRecord) time.Time {
+	if !run.CreatedAt.IsZero() {
+		return run.CreatedAt
+	}
+	if !run.StartedAt.IsZero() {
+		return run.StartedAt
+	}
+	return run.EndedAt
 }
 
 func markTeamProvider(team *types.TeamInfo, provider string) {
@@ -304,21 +437,357 @@ func markTeamProvider(team *types.TeamInfo, provider string) {
 	}
 }
 
-func codexTeamName(sessionID, cwd string) string {
+type codexSessionEnvelope struct {
+	session    parser.CodexSessionDiscovery
+	agent      types.AgentInfo
+	createdAt  time.Time
+	lastActive time.Time
+	cwdKey     string
+	cwdDisplay string
+	prefixKey  string
+	teamLabel  string
+}
+
+type codexUnionFind struct {
+	parent []int
+	rank   []int
+}
+
+func newCodexUnionFind(size int) *codexUnionFind {
+	parent := make([]int, size)
+	rank := make([]int, size)
+	for i := range parent {
+		parent[i] = i
+	}
+	return &codexUnionFind{
+		parent: parent,
+		rank:   rank,
+	}
+}
+
+func (uf *codexUnionFind) find(index int) int {
+	if uf.parent[index] != index {
+		uf.parent[index] = uf.find(uf.parent[index])
+	}
+	return uf.parent[index]
+}
+
+func (uf *codexUnionFind) union(a, b int) {
+	rootA := uf.find(a)
+	rootB := uf.find(b)
+	if rootA == rootB {
+		return
+	}
+	if uf.rank[rootA] < uf.rank[rootB] {
+		rootA, rootB = rootB, rootA
+	}
+	uf.parent[rootB] = rootA
+	if uf.rank[rootA] == uf.rank[rootB] {
+		uf.rank[rootA]++
+	}
+}
+
+func (c *Collector) buildCodexTeams(discovered []parser.CodexSessionDiscovery, now time.Time) []types.TeamInfo {
+	if len(discovered) == 0 {
+		return []types.TeamInfo{}
+	}
+
+	envelopes := make([]codexSessionEnvelope, 0, len(discovered))
+	for _, session := range discovered {
+		envelopes = append(envelopes, buildCodexSessionEnvelope(session, now))
+	}
+
+	unions := newCodexUnionFind(len(envelopes))
+	keyOwners := make(map[string]int, len(envelopes)*2)
+
+	for i, envelope := range envelopes {
+		keys := []string{}
+		if envelope.cwdKey != "" {
+			keys = append(keys, "cwd:"+envelope.cwdKey)
+		}
+		if envelope.prefixKey != "" {
+			keys = append(keys, "prefix:"+envelope.prefixKey)
+		}
+
+		for _, key := range keys {
+			if existing, ok := keyOwners[key]; ok {
+				unions.union(i, existing)
+				continue
+			}
+			keyOwners[key] = i
+		}
+	}
+
+	grouped := make(map[int][]codexSessionEnvelope, len(envelopes))
+	order := make([]int, 0, len(envelopes))
+	for i, envelope := range envelopes {
+		root := unions.find(i)
+		if _, ok := grouped[root]; !ok {
+			order = append(order, root)
+		}
+		grouped[root] = append(grouped[root], envelope)
+	}
+
+	teams := make([]types.TeamInfo, 0, len(grouped))
+	for _, root := range order {
+		group := grouped[root]
+		if len(group) == 0 {
+			continue
+		}
+
+		team := buildCodexTeam(group)
+		c.buildAgentNarratives(&team)
+		teams = append(teams, team)
+	}
+
+	sort.SliceStable(teams, func(i, j int) bool {
+		return latestTeamActivityTime(teams[i]).After(latestTeamActivityTime(teams[j]))
+	})
+
+	return teams
+}
+
+func buildCodexSessionEnvelope(session parser.CodexSessionDiscovery, now time.Time) codexSessionEnvelope {
+	lastActive := session.LastActiveAt
+	if lastActive.IsZero() {
+		lastActive = session.StartedAt
+	}
+
+	createdAt := session.StartedAt
+	if createdAt.IsZero() {
+		createdAt = lastActive
+	}
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+
+	status := "idle"
+	if !lastActive.IsZero() && now.Sub(lastActive) <= codexWorkingRecentThreshold {
+		status = "working"
+	}
+
+	cleanCwd := cleanDisplayPath(session.Cwd)
+	teamLabel := codexTeamLabel(cleanCwd)
+
+	messageSummary := firstNonEmpty(session.LastAgentMessage, session.LastUserMessage)
+	latestMessage := firstNonEmpty(session.LastAgentMessage, session.LastUserMessage)
+	agentName := codexAgentName(session.DisplayName, session.SessionID, cleanCwd)
+
+	agent := types.AgentInfo{
+		Name:            agentName,
+		Provider:        "codex",
+		AgentID:         session.SessionID,
+		AgentType:       "codex",
+		Status:          status,
+		CurrentTask:     session.LastUserMessage,
+		LastActivity:    lastActive,
+		Cwd:             cleanCwd,
+		LatestMessage:   latestMessage,
+		MessageSummary:  messageSummary,
+		LatestResponse:  session.FullAgentMessage,
+		LastMessageTime: lastActive,
+		LastThinking:    session.LastReasoning,
+		LastToolUse:     session.LastToolUse,
+		LastToolDetail:  session.LastToolDetail,
+		LastActiveTime:  lastActive,
+		RecentEvents:    convertCodexEvents(session.RecentEvents),
+	}
+
+	return codexSessionEnvelope{
+		session:    session,
+		agent:      agent,
+		createdAt:  createdAt,
+		lastActive: lastActive,
+		cwdKey:     normalizeComparablePath(cleanCwd),
+		cwdDisplay: cleanCwd,
+		prefixKey:  codexTeamPrefix(cleanCwd),
+		teamLabel:  teamLabel,
+	}
+}
+
+func buildCodexTeam(group []codexSessionEnvelope) types.TeamInfo {
+	createdAt := time.Time{}
+	leadSessionID := ""
+	projectCwd := ""
+	latestActive := time.Time{}
+	members := make([]types.AgentInfo, 0, len(group))
+	labelCounts := make(map[string]int)
+	cwdCounts := make(map[string]int)
+	cwdDisplay := make(map[string]string)
+
+	for _, envelope := range group {
+		if createdAt.IsZero() || envelope.createdAt.Before(createdAt) {
+			createdAt = envelope.createdAt
+		}
+		if latestActive.IsZero() || envelope.lastActive.After(latestActive) {
+			latestActive = envelope.lastActive
+			leadSessionID = envelope.session.SessionID
+		}
+		if envelope.teamLabel != "" {
+			labelCounts[envelope.teamLabel]++
+		}
+		if envelope.cwdKey != "" {
+			cwdCounts[envelope.cwdKey]++
+			if cwdDisplay[envelope.cwdKey] == "" && envelope.cwdDisplay != "" {
+				cwdDisplay[envelope.cwdKey] = envelope.cwdDisplay
+			}
+		}
+		members = append(members, envelope.agent)
+	}
+
+	sort.SliceStable(members, func(i, j int) bool {
+		return members[i].LastActiveTime.After(members[j].LastActiveTime)
+	})
+
+	label := pickDominantCodexLabel(group, labelCounts)
+	if label == "" {
+		label = codexShortID(leadSessionID)
+	}
+
+	projectCwd = pickDominantCodexCwd(group, cwdCounts, cwdDisplay)
+
+	return types.TeamInfo{
+		Name:          "codex-" + label,
+		Provider:      "codex",
+		CreatedAt:     createdAt,
+		LeadSessionID: leadSessionID,
+		ProjectCwd:    projectCwd,
+		Members:       members,
+		Tasks:         []types.TaskInfo{},
+	}
+}
+
+func pickDominantCodexLabel(group []codexSessionEnvelope, counts map[string]int) string {
+	bestLabel := ""
+	bestCount := 0
+	bestActive := time.Time{}
+
+	for _, envelope := range group {
+		label := envelope.teamLabel
+		if label == "" {
+			continue
+		}
+		count := counts[label]
+		if count > bestCount || (count == bestCount && envelope.lastActive.After(bestActive)) {
+			bestLabel = label
+			bestCount = count
+			bestActive = envelope.lastActive
+		}
+	}
+
+	return bestLabel
+}
+
+func pickDominantCodexCwd(group []codexSessionEnvelope, counts map[string]int, display map[string]string) string {
+	bestKey := ""
+	bestCount := 0
+	bestActive := time.Time{}
+
+	for _, envelope := range group {
+		if envelope.cwdKey == "" {
+			continue
+		}
+		count := counts[envelope.cwdKey]
+		if count > bestCount || (count == bestCount && envelope.lastActive.After(bestActive)) {
+			bestKey = envelope.cwdKey
+			bestCount = count
+			bestActive = envelope.lastActive
+		}
+	}
+
+	if bestKey == "" {
+		return ""
+	}
+	if value := strings.TrimSpace(display[bestKey]); value != "" {
+		return value
+	}
+	return bestKey
+}
+
+func codexAgentName(displayName, sessionID, cwd string) string {
+	if value := strings.TrimSpace(displayName); value != "" {
+		return value
+	}
+
+	shortID := codexShortID(sessionID)
+	label := codexTeamLabel(cwd)
+	if label == "" {
+		return "codex-" + shortID
+	}
+	return "codex-" + label + "-" + shortID
+}
+
+func codexShortID(sessionID string) string {
 	shortID := strings.TrimSpace(sessionID)
 	if len(shortID) > 8 {
 		shortID = shortID[:8]
 	}
 	if shortID == "" {
-		shortID = "unknown"
+		return "unknown"
+	}
+	return shortID
+}
+
+func codexTeamPrefix(cwd string) string {
+	label := codexTeamLabel(cwd)
+	if label == "" {
+		return ""
+	}
+	return "codex-" + label
+}
+
+func codexTeamLabel(cwd string) string {
+	base := strings.TrimSpace(filepath.Base(strings.TrimSpace(cwd)))
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	return sanitizeCodexSlug(base)
+}
+
+func sanitizeCodexSlug(raw string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return ""
 	}
 
-	cwdBase := strings.TrimSpace(filepath.Base(cwd))
-	if cwdBase == "" || cwdBase == "." || cwdBase == string(filepath.Separator) {
-		return "codex-" + shortID
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
 	}
-	cwdBase = strings.ReplaceAll(cwdBase, " ", "-")
-	return "codex-" + cwdBase + "-" + shortID
+
+	return strings.Trim(builder.String(), "-")
+}
+
+func cleanDisplayPath(raw string) string {
+	cleaned := strings.TrimSpace(raw)
+	if cleaned == "" {
+		return ""
+	}
+	cleaned = filepath.Clean(cleaned)
+	if cleaned == "." {
+		return ""
+	}
+	return cleaned
+}
+
+func normalizeComparablePath(raw string) string {
+	cleaned := cleanDisplayPath(raw)
+	if cleaned == "" {
+		return ""
+	}
+	if windowsAbsPathPattern.MatchString(cleaned) {
+		return strings.ToLower(cleaned)
+	}
+	return cleaned
 }
 
 func (c *Collector) logDiscoveryMetrics(elapsed time.Duration, discovered []parser.ProjectTeamDiscovery) {
@@ -864,6 +1333,33 @@ func (c *Collector) loadAgentInboxes(team *types.TeamInfo, teamsDir string) {
 			agent.MessageSummary = message.Summary
 			agent.LastMessageTime = message.Timestamp
 		}
+
+		messages, err := parser.ParseInboxMessages(teamsDir, team.Name, agent.Name)
+		if err != nil {
+			log.Printf("Error parsing inbox history for %s: %v", agent.Name, err)
+			continue
+		}
+
+		for j := len(messages) - 1; j >= 0 && len(agent.RecentEvents) < 8; j-- {
+			text := strings.TrimSpace(messages[j].Text)
+			if text == "" {
+				continue
+			}
+
+			kind := "message"
+			title := "消息"
+			if messages[j].Summary != "" {
+				title = "结果摘要"
+			}
+
+			agent.RecentEvents = append(agent.RecentEvents, types.AgentEvent{
+				Kind:      kind,
+				Title:     title,
+				Text:      text,
+				Source:    "inbox",
+				Timestamp: messages[j].Timestamp,
+			})
+		}
 	}
 }
 
@@ -893,7 +1389,11 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 			agent.LastThinking = activity.LastThinking
 			agent.LastToolUse = activity.LastToolUse
 			agent.LastToolDetail = activity.LastToolDetail
+			if activity.LastResponse != "" {
+				agent.LatestResponse = activity.LastResponse
+			}
 			agent.LastActiveTime = activity.LastActiveTime
+			agent.RecentEvents = append(agent.RecentEvents, convertActivityEvents(activity.RecentEvents)...)
 		}
 
 		// Load TodoWrite items for this agent
@@ -925,7 +1425,11 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 					agent.LastThinking = leadActivity.LastThinking
 					agent.LastToolUse = leadActivity.LastToolUse
 					agent.LastToolDetail = leadActivity.LastToolDetail
+					if leadActivity.LastResponse != "" {
+						agent.LatestResponse = leadActivity.LastResponse
+					}
 					agent.LastActiveTime = leadActivity.LastActiveTime
+					agent.RecentEvents = append(agent.RecentEvents, convertActivityEvents(leadActivity.RecentEvents)...)
 				}
 			}
 			// Also try loading todos from lead session
@@ -939,6 +1443,8 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 				}
 			}
 		}
+
+		agent.RecentEvents = compactAgentEvents(agent.RecentEvents, 10)
 	}
 }
 
@@ -1028,6 +1534,7 @@ func (c *Collector) GetState() types.MonitorState {
 		for j, member := range teamCopy.Members {
 			member.OfficeDialogues = append([]string(nil), member.OfficeDialogues...)
 			member.Todos = append([]types.TodoItem(nil), member.Todos...)
+			member.RecentEvents = append([]types.AgentEvent(nil), member.RecentEvents...)
 
 			if !exposeAbsolutePaths {
 				member.Cwd = sanitizeDisplayPath(member.Cwd)
@@ -1043,6 +1550,106 @@ func (c *Collector) GetState() types.MonitorState {
 	}
 
 	return stateCopy
+}
+
+func convertActivityEvents(events []parser.AgentActivityEvent) []types.AgentEvent {
+	if len(events) == 0 {
+		return nil
+	}
+
+	converted := make([]types.AgentEvent, 0, len(events))
+	for _, event := range events {
+		converted = append(converted, types.AgentEvent{
+			Kind:      event.Kind,
+			Title:     event.Title,
+			Text:      event.Text,
+			Source:    "activity_log",
+			Timestamp: event.Timestamp,
+		})
+	}
+	return converted
+}
+
+func convertCodexEvents(events []parser.CodexSessionEvent) []types.AgentEvent {
+	if len(events) == 0 {
+		return nil
+	}
+
+	converted := make([]types.AgentEvent, 0, len(events))
+	for _, event := range events {
+		converted = append(converted, types.AgentEvent{
+			Kind:      event.Kind,
+			Title:     event.Title,
+			Text:      event.Text,
+			Source:    "codex_session",
+			Timestamp: event.Timestamp,
+		})
+	}
+	return converted
+}
+
+func convertOpenClawEvents(events []parser.OpenClawSessionEvent) []types.AgentEvent {
+	if len(events) == 0 {
+		return nil
+	}
+
+	converted := make([]types.AgentEvent, 0, len(events))
+	for _, event := range events {
+		converted = append(converted, types.AgentEvent{
+			Kind:      event.Kind,
+			Title:     event.Title,
+			Text:      event.Text,
+			Source:    "openclaw_session",
+			Timestamp: event.Timestamp,
+		})
+	}
+	return converted
+}
+
+func compactAgentEvents(events []types.AgentEvent, limit int) []types.AgentEvent {
+	if len(events) == 0 || limit <= 0 {
+		return nil
+	}
+
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].Timestamp.After(events[j].Timestamp)
+	})
+
+	compacted := make([]types.AgentEvent, 0, minCollector(limit, len(events)))
+	seen := make(map[string]struct{})
+	for _, event := range events {
+		if strings.TrimSpace(event.Text) == "" {
+			continue
+		}
+
+		key := event.Kind + "\x00" + event.Text
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		compacted = append(compacted, event)
+		if len(compacted) >= limit {
+			break
+		}
+	}
+
+	return compacted
+}
+
+func minCollector(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func readBoolEnv(key string, defaultValue bool) bool {

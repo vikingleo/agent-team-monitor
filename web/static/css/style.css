@@ -56,6 +56,19 @@
     --warning-color: #ea580c;
     --warning-dim: rgba(234, 88, 12, 0.10);
 
+    --panel-task-bg: rgba(5, 150, 105, 0.08);
+    --panel-task-border: rgba(5, 150, 105, 0.18);
+    --panel-tool-bg: rgba(8, 145, 178, 0.08);
+    --panel-tool-border: rgba(8, 145, 178, 0.18);
+    --panel-message-bg: rgba(234, 88, 12, 0.08);
+    --panel-message-border: rgba(234, 88, 12, 0.18);
+    --panel-thinking-bg: rgba(124, 58, 237, 0.08);
+    --panel-thinking-border: rgba(124, 58, 237, 0.18);
+    --panel-output-bg: rgba(15, 23, 42, 0.04);
+    --panel-output-border: rgba(15, 23, 42, 0.1);
+    --panel-activity-bg: rgba(100, 116, 139, 0.08);
+    --panel-activity-border: rgba(100, 116, 139, 0.16);
+
     /* Bubble */
     --bubble-primary: rgba(8, 145, 178, 0.08);
     --bubble-secondary: rgba(255, 255, 255, 0.7);
@@ -119,6 +132,19 @@
     --warning-color: #fb923c;
     --warning-dim: rgba(251, 146, 60, 0.10);
 
+    --panel-task-bg: rgba(52, 211, 153, 0.12);
+    --panel-task-border: rgba(52, 211, 153, 0.22);
+    --panel-tool-bg: rgba(34, 211, 238, 0.12);
+    --panel-tool-border: rgba(34, 211, 238, 0.22);
+    --panel-message-bg: rgba(251, 146, 60, 0.12);
+    --panel-message-border: rgba(251, 146, 60, 0.22);
+    --panel-thinking-bg: rgba(168, 85, 247, 0.12);
+    --panel-thinking-border: rgba(168, 85, 247, 0.22);
+    --panel-output-bg: rgba(255, 255, 255, 0.04);
+    --panel-output-border: rgba(255, 255, 255, 0.08);
+    --panel-activity-bg: rgba(148, 163, 184, 0.1);
+    --panel-activity-border: rgba(148, 163, 184, 0.16);
+
     --bubble-primary: rgba(34, 211, 238, 0.08);
     --bubble-secondary: rgba(255, 255, 255, 0.03);
 
@@ -141,13 +167,23 @@ body {
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
 }
 
 /* ---- Layout ---- */
 .container {
-    max-width: 1600px;
-    margin: 0 auto;
-    padding: 16px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 16px 20px 84px;
+}
+
+.app-shell {
+    min-height: 100vh;
+}
+
+.dashboard-main {
+    width: 100%;
 }
 
 /* ---- Header ---- */
@@ -549,7 +585,7 @@ header h1 {
 .teams-grid {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 18px;
 }
 
 /* ---- Bottom Team Nav ---- */
@@ -611,7 +647,7 @@ header h1 {
     background: var(--bg-card);
     border: 1px solid var(--border-default);
     border-radius: var(--radius-lg);
-    padding: 16px;
+    padding: 18px;
     transition: border-color var(--transition-normal);
 }
 
@@ -677,6 +713,35 @@ header h1 {
     margin-bottom: 12px;
 }
 
+.team-summary-bar {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.team-summary-item {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.team-summary-label {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.team-summary-value {
+    color: var(--text-primary);
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
 .team-section:last-child {
     margin-bottom: 0;
 }
@@ -713,20 +778,20 @@ header h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: 12px;
+    padding: 14px;
 }
 
 .office-hint {
     color: var(--text-muted);
-    font-size: 0.72rem;
-    margin-bottom: 10px;
+    font-size: 0.76rem;
+    margin-bottom: 12px;
 }
 
 /* ---- Agent List ---- */
 .agent-list {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
 }
 
 .office-floor {
@@ -738,10 +803,35 @@ header h1 {
     background: var(--bg-card);
     border: 1px solid var(--border-default);
     border-left: 3px solid var(--working-color);
-    padding: 10px 12px;
-    border-radius: var(--radius-sm);
+    padding: 14px;
+    border-radius: 12px;
     font-size: 0.82rem;
     transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
+    min-width: 0;
+}
+
+.agent-compact-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    text-align: left;
+    cursor: pointer;
+    appearance: none;
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    background: var(--bg-card);
+}
+
+.agent-compact-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.agent-compact-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .agent-header {
@@ -857,6 +947,11 @@ header h1 {
     color: var(--completed-color);
 }
 
+.agent-status.pending {
+    background: var(--warning-dim);
+    color: var(--warning-color);
+}
+
 /* ---- Agent Activity Indicator ---- */
 .agent-activity {
     margin-left: auto;
@@ -883,15 +978,105 @@ header h1 {
 .agent-dialogues {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-top: 8px;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.agent-compact-signal {
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle);
+    padding: 10px 12px;
+    min-width: 0;
+}
+
+.agent-compact-signal.task {
+    background: var(--panel-task-bg);
+    border-color: var(--panel-task-border);
+}
+
+.agent-compact-signal.tool {
+    background: var(--panel-tool-bg);
+    border-color: var(--panel-tool-border);
+}
+
+.agent-compact-signal.message {
+    background: var(--panel-message-bg);
+    border-color: var(--panel-message-border);
+}
+
+.agent-compact-signal.thinking {
+    background: var(--panel-thinking-bg);
+    border-color: var(--panel-thinking-border);
+}
+
+.agent-compact-label {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.agent-compact-value {
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.agent-compact-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.agent-compact-latest {
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    min-height: 2.4em;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.agent-compact-meta {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+.agent-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.9fr);
+    gap: 14px;
+    margin-top: 12px;
+    align-items: start;
+}
+
+.agent-main-column,
+.agent-side-column {
+    min-width: 0;
+}
+
+.agent-main-column {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.agent-side-column {
+    position: relative;
 }
 
 .agent-bubble {
-    padding: 6px 10px;
-    border-radius: 8px;
-    font-size: 0.75rem;
-    line-height: 1.4;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 0.78rem;
+    line-height: 1.5;
 }
 
 .agent-bubble.primary {
@@ -936,13 +1121,16 @@ header h1 {
 }
 
 .agent-cwd {
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     color: var(--text-muted);
-    margin-top: 4px;
+    margin-top: 10px;
     font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-all;
+}
+
+.agent-detail-shell {
+    min-width: 0;
 }
 
 /* ---- Agent Tasks ---- */
@@ -951,6 +1139,286 @@ header h1 {
     margin-left: 10px;
     padding-left: 10px;
     border-left: 2px solid var(--border-subtle);
+}
+
+.agent-tasks-panel,
+.agent-output-panel,
+.agent-timeline-panel,
+.agent-todos {
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+}
+
+.agent-panel-section {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.agent-panel-title {
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.agent-signal-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.agent-signal-card {
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 10px 12px;
+    min-width: 0;
+}
+
+.agent-signal-value {
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.agent-signal-card .agent-panel-title {
+    margin-bottom: 6px;
+    font-size: 0.7rem;
+}
+
+.agent-signal-card.task,
+.panel-tasklist {
+    background: var(--panel-task-bg);
+    border-color: var(--panel-task-border);
+}
+
+.agent-signal-card.tool {
+    background: var(--panel-tool-bg);
+    border-color: var(--panel-tool-border);
+}
+
+.agent-signal-card.message {
+    background: var(--panel-message-bg);
+    border-color: var(--panel-message-border);
+}
+
+.agent-signal-card.thinking {
+    background: var(--panel-thinking-bg);
+    border-color: var(--panel-thinking-border);
+}
+
+.panel-output {
+    background: var(--panel-output-bg);
+    border-color: var(--panel-output-border);
+}
+
+.panel-activity {
+    background: var(--panel-activity-bg);
+    border-color: var(--panel-activity-border);
+}
+
+.panel-todo {
+    background: var(--surface-overlay);
+    border-color: var(--border-default);
+}
+
+.agent-output-text,
+.timeline-text {
+    margin: 0;
+    font: inherit;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.agent-empty-text {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    line-height: 1.55;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.agent-output-text {
+    max-height: 420px;
+    overflow: auto;
+}
+
+.agent-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.timeline-item {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.timeline-marker {
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--surface-inset-strong);
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.timeline-content {
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--bubble-secondary);
+    border: 1px solid var(--border-subtle);
+}
+
+.timeline-item.tool .timeline-content {
+    background: var(--panel-tool-bg);
+    border-color: var(--panel-tool-border);
+}
+
+.timeline-item.thinking .timeline-content {
+    background: var(--panel-thinking-bg);
+    border-color: var(--panel-thinking-border);
+}
+
+.timeline-item.task .timeline-content {
+    background: var(--panel-task-bg);
+    border-color: var(--panel-task-border);
+}
+
+.timeline-item.message .timeline-content,
+.timeline-item.response .timeline-content {
+    background: var(--panel-message-bg);
+    border-color: var(--panel-message-border);
+}
+
+.timeline-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.timeline-title {
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    font-weight: 600;
+}
+
+.timeline-time {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    white-space: nowrap;
+}
+
+.agent-detail-modal[hidden] {
+    display: none;
+}
+
+.agent-detail-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+}
+
+.agent-detail-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.56);
+    backdrop-filter: blur(4px);
+}
+
+.agent-detail-dialog {
+    position: relative;
+    width: min(1200px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    margin: 16px auto;
+    padding: 22px;
+    border-radius: 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+}
+
+.agent-detail-content {
+    min-width: 0;
+}
+
+.agent-detail-close {
+    position: sticky;
+    top: 0;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: var(--surface-overlay-strong);
+    color: var(--text-secondary);
+    cursor: pointer;
+    z-index: 1;
+}
+
+.agent-detail-close svg {
+    width: 16px;
+    height: 16px;
+}
+
+.agent-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.agent-detail-title-wrap {
+    min-width: 0;
+}
+
+.agent-detail-title {
+    color: var(--text-primary);
+    font-size: 1.2rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.agent-detail-subtitle {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    margin-top: 4px;
+}
+
+.agent-detail-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+body.agent-detail-open {
+    overflow: hidden;
 }
 
 .task-list-title {
@@ -965,23 +1433,22 @@ header h1 {
 .task-list-compact {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 6px;
 }
 
 .task-item-compact {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.72rem;
-    padding: 3px 0;
+    font-size: 0.76rem;
+    padding: 6px 0;
 }
 
 .task-subject-compact {
     color: var(--text-secondary);
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
 }
 
 /* ---- Agent Todos ---- */
@@ -1016,9 +1483,8 @@ header h1 {
 
 .todo-item-compact .todo-content {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
     color: var(--text-secondary);
 }
 
@@ -1045,7 +1511,7 @@ header h1 {
 /* ---- Task List ---- */
 .task-list {
     display: grid;
-    gap: 6px;
+    gap: 10px;
 }
 
 .task-item {
@@ -1100,9 +1566,8 @@ header h1 {
     color: var(--text-secondary);
     margin-bottom: 2px;
     font-size: 0.82rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
 }
 
 .task-owner {
@@ -1133,7 +1598,7 @@ footer a:hover {
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
     .container {
-        padding: 10px;
+        padding: 10px 10px 80px;
     }
 
     .view-controls {
@@ -1154,6 +1619,27 @@ footer a:hover {
 
     .agent-list {
         grid-template-columns: 1fr;
+    }
+
+    .team-summary-bar,
+    .agent-signal-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-detail-dialog {
+        width: min(100vw - 16px, 1000px);
+        max-height: calc(100vh - 16px);
+        margin: 8px auto;
+        padding: 16px;
+    }
+
+    .agent-detail-header {
+        flex-direction: column;
+        align-items: flex-start;
     }
 
     header h1 {
@@ -1197,7 +1683,18 @@ footer a:hover {
 
 @media (max-width: 1200px) {
     .agent-list {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 900px) {
+    .agent-list {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agent-signal-grid,
+    .agent-layout {
+        grid-template-columns: 1fr;
     }
 }
 
