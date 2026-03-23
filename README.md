@@ -105,7 +105,8 @@ ATM_MODE=web ATM_PORT=3000 ATM_PROVIDER=both ./scripts/service.sh start
 - PID 文件：`run/agent-team-monitor.pid`
 - 标准日志：`logs/agent-team-monitor.out.log`
 - 错误日志：`logs/agent-team-monitor.err.log`
-- 启动前会自动执行 `go build`
+- 默认直接执行 `scripts/agent-team-monitor`
+- 可通过 `ATM_APP_BIN` 指定其他二进制路径
 
 ## API 接口
 

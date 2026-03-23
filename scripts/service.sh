@@ -15,16 +15,17 @@ set -euo pipefail
 #   ATM_MODE=web|tui           默认 web
 #   ATM_PORT=8080              web 模式端口
 #   ATM_PROVIDER=both          claude|codex|openclaw|both
-#   ATM_APP_BIN=bin/agent-team-monitor
+#   ATM_APP_BIN=...            自定义二进制路径（相对路径基于脚本目录）
 #   ATM_RUN_DIR=run
 #   ATM_LOG_DIR=logs
 # ============================================================
 
 ACTION="${1:-status}"
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_BIN="${ATM_APP_BIN:-bin/agent-team-monitor}"
-APP_VERSION="${ATM_APP_VERSION:-$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_APP_BIN="${SCRIPT_DIR}/agent-team-monitor"
+APP_BIN="${ATM_APP_BIN:-${DEFAULT_APP_BIN}}"
 MODE="${ATM_MODE:-web}"
 PORT="${ATM_PORT:-8080}"
 PROVIDER="${ATM_PROVIDER:-both}"
@@ -34,15 +35,20 @@ PID_FILE="${ROOT_DIR}/${RUN_DIR}/agent-team-monitor.pid"
 STDOUT_LOG="${ROOT_DIR}/${LOG_DIR}/agent-team-monitor.out.log"
 STDERR_LOG="${ROOT_DIR}/${LOG_DIR}/agent-team-monitor.err.log"
 
-mkdir -p "${ROOT_DIR}/${RUN_DIR}" "${ROOT_DIR}/${LOG_DIR}" "${ROOT_DIR}/bin"
+if [[ "${APP_BIN}" != /* ]]; then
+  APP_BIN="${SCRIPT_DIR}/${APP_BIN}"
+fi
 
-build_binary() {
-  echo ">> 构建中..."
-  (
-    cd "${ROOT_DIR}"
-    go build -ldflags "-X main.appVersion=${APP_VERSION}" -o "${APP_BIN}" ./cmd/monitor
-  )
-  echo ">> 构建完成: ${APP_BIN}"
+mkdir -p "${ROOT_DIR}/${RUN_DIR}" "${ROOT_DIR}/${LOG_DIR}"
+
+ensure_binary() {
+  if [[ -x "${APP_BIN}" ]]; then
+    return 0
+  fi
+
+  echo ">> 未找到可执行二进制: ${APP_BIN}"
+  echo ">> 请先将部署二进制放到脚本同级目录，或通过 ATM_APP_BIN 指定路径"
+  return 1
 }
 
 is_running() {
@@ -83,18 +89,19 @@ start_service() {
     return 0
   fi
 
-  build_binary
+  ensure_binary
 
   local cmd
   if [[ "${MODE}" == "web" ]]; then
-    cmd=( "./${APP_BIN}" -web -addr ":${PORT}" -provider "${PROVIDER}" )
+    cmd=( "${APP_BIN}" -web -addr ":${PORT}" -provider "${PROVIDER}" )
   else
-    cmd=( "./${APP_BIN}" -provider "${PROVIDER}" )
+    cmd=( "${APP_BIN}" -provider "${PROVIDER}" )
   fi
 
   echo ">> 启动模式: ${MODE}"
   echo ">> 数据源: ${PROVIDER}"
   [[ "${MODE}" == "web" ]] && echo ">> 端口: ${PORT}"
+  echo ">> 二进制: ${APP_BIN}"
   echo ">> 日志输出: ${STDOUT_LOG}"
   echo ">> 错误日志: ${STDERR_LOG}"
 

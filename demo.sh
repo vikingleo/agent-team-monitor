@@ -6,6 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BINARY_PATH="$SCRIPT_DIR/agent-team-monitor"
 cd "$SCRIPT_DIR"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
@@ -16,16 +17,14 @@ echo "╚═══════════════════════�
 echo ""
 
 # Check if binary exists
-if [ ! -f "bin/agent-team-monitor" ]; then
-    echo "❌ Binary not found. Building..."
-    make build
-    echo "✅ Build complete!"
-    echo ""
+if [ ! -x "$BINARY_PATH" ]; then
+    echo "❌ Binary not found or not executable: $BINARY_PATH"
+    exit 1
 fi
 
 # Show version
 echo "📦 Version Information:"
-./bin/agent-team-monitor -version
+"$BINARY_PATH" -version
 echo ""
 
 # Create test data if needed
@@ -52,7 +51,7 @@ case $choice in
         echo "Press 'q' to quit"
         echo ""
         sleep 2
-        ./bin/agent-team-monitor
+        "$BINARY_PATH"
         ;;
     2)
         echo ""
@@ -80,11 +79,11 @@ case $choice in
             sleep 1 && xdg-open http://localhost:8080 &
         fi
 
-        ./bin/agent-team-monitor -web
+        "$BINARY_PATH" -web
         ;;
     3)
         echo ""
-        ./bin/agent-team-monitor -h
+        "$BINARY_PATH" -h
         echo ""
         echo "📚 Documentation:"
         echo "   README.md        - Main documentation"
