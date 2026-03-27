@@ -10,15 +10,17 @@ set -euo pipefail
 #
 # 前置条件:
 #   - 已安装 go、gh (GitHub CLI) 并已登录
-#   - 本地存在名为 github 的 GitHub remote
+#   - 本地存在 GitHub remote，默认使用 origin（可通过 GIT_REMOTE 覆盖）
 # ============================================================
 
 APP_NAME="agent-team-monitor"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/bin"
 ENTRY="./cmd/monitor"
-GH_REMOTE="github"
-GH_REPO="${GH_REPO:-vikingleo/agent-team-monitor}"
+GIT_REMOTE="${GIT_REMOTE:-origin}"
+GH_REPO="${GH_REPO:-}"
+DEFAULT_GH_REPO="vikingleo/agent-team-monitor"
+REMOTE_URL=""
 
 PLATFORMS=(
   "darwin/amd64"
@@ -29,14 +31,48 @@ PLATFORMS=(
   "windows/arm64"
 )
 
+parse_github_repo() {
+  local remote_url="$1"
+  local repo_path="$remote_url"
+
+  repo_path="${repo_path#git@github.com:}"
+  repo_path="${repo_path#ssh://git@github.com/}"
+  repo_path="${repo_path#https://github.com/}"
+  repo_path="${repo_path#http://github.com/}"
+  repo_path="${repo_path%.git}"
+
+  if [[ "$repo_path" == */* && "$repo_path" != "$remote_url" ]]; then
+    echo "$repo_path"
+    return 0
+  fi
+
+  return 1
+}
+
 resolve_git_remote() {
-  if git remote get-url "${GH_REMOTE}" >/dev/null 2>&1; then
+  if ! git remote get-url "${GIT_REMOTE}" >/dev/null 2>&1; then
+    local example_repo="${GH_REPO:-${DEFAULT_GH_REPO}}"
+    echo "错误: 未找到名为 ${GIT_REMOTE} 的 Git remote"
+    echo "请先执行:"
+    echo "  git remote add ${GIT_REMOTE} git@github.com:${example_repo}.git"
+    exit 1
+  fi
+
+  REMOTE_URL="$(git remote get-url "${GIT_REMOTE}")"
+}
+
+resolve_github_repo() {
+  if [[ -n "${GH_REPO}" ]]; then
     return
   fi
 
-  echo "错误: 未找到名为 ${GH_REMOTE} 的 GitHub remote"
-  echo "请先执行:"
-  echo "  git remote add github git@github.com:${GH_REPO}.git"
+  if GH_REPO="$(parse_github_repo "${REMOTE_URL}")"; then
+    return
+  fi
+
+  echo "错误: 无法从 remote ${GIT_REMOTE} 解析 GitHub 仓库"
+  echo "当前 remote URL: ${REMOTE_URL}"
+  echo "请设置 GH_REPO=<owner>/<repo> 后重试"
   exit 1
 }
 
@@ -67,6 +103,7 @@ cleanup() {
 }
 
 resolve_git_remote
+resolve_github_repo
 trap cleanup EXIT
 
 # ---- 版本号 ----
@@ -83,7 +120,7 @@ fi
 
 echo "=========================================="
 echo "  发布版本: ${VERSION}"
-echo "  远程仓库: ${GH_REMOTE} (${GH_REPO})"
+echo "  远程仓库: ${GIT_REMOTE} (${GH_REPO})"
 echo "=========================================="
 
 # ---- 确认 ----
@@ -104,8 +141,8 @@ if ! git rev-parse "$VERSION" >/dev/null 2>&1; then
 fi
 
 # ---- 推送 tag ----
-echo ">> 推送 tag 到 ${GH_REMOTE}..."
-git push "$GH_REMOTE" "$VERSION"
+echo ">> 推送 tag 到 ${GIT_REMOTE}..."
+git push "$GIT_REMOTE" "$VERSION"
 
 SEMVER="${VERSION#v}"
 
