@@ -1,4 +1,4 @@
-.PHONY: build build-desktop install-desktop-entry package-deb run run-web clean install test build-all build-windows release
+.PHONY: build build-desktop install-desktop-entry package-deb package-appimage run run-web clean install test build-all build-windows release
 
 APP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GO_LDFLAGS ?= -X main.appVersion=$(APP_VERSION)
@@ -21,6 +21,11 @@ install-desktop-entry: build-desktop
 package-deb: build-desktop
 	chmod +x ./scripts/build-deb.sh
 	./scripts/build-deb.sh
+
+# Build an AppImage package for Linux desktop installation
+package-appimage: build-desktop
+	chmod +x ./scripts/build-appimage.sh
+	./scripts/build-appimage.sh
 
 # Run the application in TUI mode
 run:
@@ -87,6 +92,7 @@ help:
 	@echo "  make build-desktop  - Build the Linux desktop app"
 	@echo "  make install-desktop-entry - Install Linux desktop entry and icon"
 	@echo "  make package-deb    - Build a Debian package (.deb)"
+	@echo "  make package-appimage - Build an AppImage package (.AppImage)"
 	@echo "  make run            - Run in TUI mode"
 	@echo "  make run-web        - Run in web mode (port 8080)"
 	@echo "  make run-web-port   - Run in web mode with custom port (PORT=3000)"

@@ -429,14 +429,17 @@ func gtkWindowFromHost(host desktopUIHost) *C.GtkWidget {
 }
 
 func desktopWindowIconPath() string {
-	candidates := []string{
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "512x512", "apps", "agent-team-monitor.png"),
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "256x256", "apps", "agent-team-monitor.png"),
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "128x128", "apps", "agent-team-monitor.png"),
-		"/usr/share/icons/hicolor/512x512/apps/agent-team-monitor.png",
-		"/usr/share/icons/hicolor/256x256/apps/agent-team-monitor.png",
-		"/usr/share/icons/hicolor/128x128/apps/agent-team-monitor.png",
-		filepath.Join(currentWorkingDirForWindow(), "assets", "icons", "agent-team-monitor.png"),
+	candidates := []string{}
+	for _, prefix := range desktopInstallPrefixCandidates() {
+		candidates = append(candidates,
+			filepath.Join(prefix, "share", "icons", "hicolor", "512x512", "apps", "agent-team-monitor.png"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "256x256", "apps", "agent-team-monitor.png"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "128x128", "apps", "agent-team-monitor.png"),
+			filepath.Join(prefix, "share", "agent-team-monitor", "assets", "icons", "agent-team-monitor.png"),
+		)
+	}
+	for _, root := range desktopAppRootCandidates() {
+		candidates = append(candidates, filepath.Join(root, "assets", "icons", "agent-team-monitor.png"))
 	}
 
 	for _, candidate := range candidates {
@@ -446,12 +449,4 @@ func desktopWindowIconPath() string {
 	}
 
 	return ""
-}
-
-func currentWorkingDirForWindow() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return dir
 }

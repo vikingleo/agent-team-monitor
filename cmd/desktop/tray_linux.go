@@ -214,13 +214,13 @@ func (t *desktopTray) install() error {
 }
 
 func desktopIconThemePath() string {
-	candidates := []string{
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "512x512", "apps"),
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "256x256", "apps"),
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "128x128", "apps"),
-		"/usr/share/icons/hicolor/512x512/apps",
-		"/usr/share/icons/hicolor/256x256/apps",
-		"/usr/share/icons/hicolor/128x128/apps",
+	candidates := []string{}
+	for _, prefix := range desktopInstallPrefixCandidates() {
+		candidates = append(candidates,
+			filepath.Join(prefix, "share", "icons", "hicolor", "512x512", "apps"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "256x256", "apps"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "128x128", "apps"),
+		)
 	}
 
 	for _, candidate := range candidates {
@@ -233,14 +233,17 @@ func desktopIconThemePath() string {
 }
 
 func desktopIconFilePath() string {
-	candidates := []string{
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "512x512", "apps", "agent-team-monitor.png"),
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "256x256", "apps", "agent-team-monitor.png"),
-		filepath.Join(userHomeDir(), ".local", "share", "icons", "hicolor", "128x128", "apps", "agent-team-monitor.png"),
-		"/usr/share/icons/hicolor/512x512/apps/agent-team-monitor.png",
-		"/usr/share/icons/hicolor/256x256/apps/agent-team-monitor.png",
-		"/usr/share/icons/hicolor/128x128/apps/agent-team-monitor.png",
-		filepath.Join(currentWorkingDir(), "assets", "icons", "agent-team-monitor.png"),
+	candidates := []string{}
+	for _, prefix := range desktopInstallPrefixCandidates() {
+		candidates = append(candidates,
+			filepath.Join(prefix, "share", "icons", "hicolor", "512x512", "apps", "agent-team-monitor.png"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "256x256", "apps", "agent-team-monitor.png"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "128x128", "apps", "agent-team-monitor.png"),
+			filepath.Join(prefix, "share", "agent-team-monitor", "assets", "icons", "agent-team-monitor.png"),
+		)
+	}
+	for _, root := range desktopAppRootCandidates() {
+		candidates = append(candidates, filepath.Join(root, "assets", "icons", "agent-team-monitor.png"))
 	}
 
 	for _, candidate := range candidates {
@@ -258,14 +261,6 @@ func userHomeDir() string {
 		return ""
 	}
 	return home
-}
-
-func currentWorkingDir() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return dir
 }
 
 func (t *desktopTray) destroy() {
