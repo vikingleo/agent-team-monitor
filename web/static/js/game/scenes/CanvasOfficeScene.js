@@ -76,6 +76,45 @@ const INTERACTION_STYLE = {
     }
 };
 
+const TEAM_DESK_THEME = {
+    claude: {
+        fill: '#c88a62',
+        stroke: '#8e5d3b',
+        line: 'rgba(120, 74, 42, 0.34)',
+        platformFill: 'rgba(200, 138, 98, 0.14)',
+        platformStroke: 'rgba(142, 93, 59, 0.18)',
+        monitorFill: '#374151',
+        monitorStroke: '#6b7280'
+    },
+    codex: {
+        fill: '#9f7b63',
+        stroke: '#6d5243',
+        line: 'rgba(93, 68, 56, 0.34)',
+        platformFill: 'rgba(159, 123, 99, 0.14)',
+        platformStroke: 'rgba(109, 82, 67, 0.18)',
+        monitorFill: '#374151',
+        monitorStroke: '#6b7280'
+    },
+    openclaw: {
+        fill: '#c97a74',
+        stroke: '#8d4f4a',
+        line: 'rgba(120, 67, 63, 0.34)',
+        platformFill: 'rgba(201, 122, 116, 0.14)',
+        platformStroke: 'rgba(141, 79, 74, 0.18)',
+        monitorFill: '#374151',
+        monitorStroke: '#6b7280'
+    },
+    unknown: {
+        fill: '#8f9b8d',
+        stroke: '#5d675c',
+        line: 'rgba(89, 96, 88, 0.34)',
+        platformFill: 'rgba(143, 155, 141, 0.14)',
+        platformStroke: 'rgba(93, 103, 92, 0.18)',
+        monitorFill: '#374151',
+        monitorStroke: '#6b7280'
+    }
+};
+
 export class CanvasOfficeScene {
     constructor(canvas) {
         this.canvas = canvas;
@@ -103,15 +142,19 @@ export class CanvasOfficeScene {
         this.actorStates = new Map();
         this.teamAnchors = new Map();
         this.facilityByType = new Map();
+        this.deskObstacles = [];
         this.previousAgentSnapshots = new Map();
         this.assignmentBursts = [];
         this.selectedActorKey = '';
+        this.desktopPreferences = { hideIdleAgents: true };
+        this.debugPathsVisible = this.readDebugPathsVisible();
 
         this.handleWheel = this.handleWheel.bind(this);
         this.handlePointerDown = this.handlePointerDown.bind(this);
         this.handlePointerMove = this.handlePointerMove.bind(this);
         this.handlePointerUp = this.handlePointerUp.bind(this);
         this.handleDoubleClick = this.handleDoubleClick.bind(this);
+        this.handleKeyDown = this.handleKeyDown.bind(this);
         this.renderLoop = this.renderLoop.bind(this);
     }
 
@@ -134,7 +177,9 @@ export class CanvasOfficeScene {
         }
 
         const now = Date.now();
+        const providerFilter = this.desktopPreferences?.providerFilter || 'all';
         const teams = state.teams
+            .filter((team) => this.matchesProviderFilter(team, providerFilter))
             .map((team) => this.prepareTeamState(team, now))
             .filter(Boolean);
 
@@ -147,7 +192,10 @@ export class CanvasOfficeScene {
     prepareTeamState(team, now) {
         const members = Array.isArray(team?.members) ? team.members : [];
         const tasks = Array.isArray(team?.tasks) ? team.tasks : [];
-        const visibleMembers = members.filter((agent) => this.shouldShowAgent(agent, tasks, now));
+        const hideIdleAgents = this.desktopPreferences?.hideIdleAgents !== false;
+        const visibleMembers = hideIdleAgents
+            ? members.filter((agent) => this.shouldShowAgent(agent, tasks, now))
+            : members;
         const visibleTasks = tasks.filter((task) => this.shouldKeepTask(task, visibleMembers));
         const hasPendingTasks = this.hasPendingTasks(visibleTasks);
 
@@ -160,6 +208,20 @@ export class CanvasOfficeScene {
             members: visibleMembers,
             tasks: visibleTasks
         };
+    }
+
+    matchesProviderFilter(team, activeFilter) {
+        if (activeFilter === 'all') {
+            return true;
+        }
+
+        const direct = String(team?.provider || '').toLowerCase();
+        if (direct === activeFilter) {
+            return true;
+        }
+
+        const members = Array.isArray(team?.members) ? team.members : [];
+        return members.some((member) => String(member?.provider || '').toLowerCase() === activeFilter);
     }
 
     shouldKeepTask(task, visibleMembers) {
@@ -244,8 +306,31 @@ export class CanvasOfficeScene {
         window.addEventListener('pointermove', this.handlePointerMove);
         window.addEventListener('pointerup', this.handlePointerUp);
         window.addEventListener('pointercancel', this.handlePointerUp);
+        window.addEventListener('keydown', this.handleKeyDown);
         this.canvas.addEventListener('dblclick', this.handleDoubleClick);
         this.canvas.style.touchAction = 'none';
+    }
+
+    readDebugPathsVisible() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const queryValue = params.get('debug_paths');
+            if (queryValue === '1' || queryValue === 'true') {
+                return true;
+            }
+            const stored = window.localStorage.getItem('agent-monitor:debug-paths');
+            return stored === '1';
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    persistDebugPathsVisible() {
+        try {
+            window.localStorage.setItem('agent-monitor:debug-paths', this.debugPathsVisible ? '1' : '0');
+        } catch (_error) {
+            // Ignore storage failures in embedded webviews.
+        }
     }
 
     handleWheel(event) {
@@ -314,6 +399,16 @@ export class CanvasOfficeScene {
         this.userMovedCamera = false;
     }
 
+    handleKeyDown(event) {
+        if (!(event.ctrlKey && event.shiftKey && String(event.key || '').toLowerCase() === 'd')) {
+            return;
+        }
+
+        event.preventDefault();
+        this.debugPathsVisible = !this.debugPathsVisible;
+        this.persistDebugPathsVisible();
+    }
+
     resizeCanvas() {
         this.viewportWidth = GameConfig.width();
         this.viewportHeight = GameConfig.height();
@@ -355,6 +450,7 @@ export class CanvasOfficeScene {
         this.bounds = this.layout.bounds || { width: this.viewportWidth, height: this.viewportHeight };
         this.facilityByType = this.indexFacilities(this.layout.facilities || []);
         this.teamAnchors = this.buildTeamAnchors(teams, this.layout.teams || []);
+        this.deskObstacles = this.buildDeskObstacles();
 
         if (shouldFitCamera) {
             this.resetCameraToFullView();
@@ -362,6 +458,23 @@ export class CanvasOfficeScene {
         }
 
         this.clampWorldPosition();
+    }
+
+    buildDeskObstacles() {
+        const obstacles = [];
+        this.teamAnchors.forEach((anchorGroup) => {
+            if (!anchorGroup?.layout) {
+                return;
+            }
+            const padding = 16;
+            obstacles.push({
+                left: anchorGroup.layout.x - anchorGroup.deskWidth / 2 - padding,
+                right: anchorGroup.layout.x + anchorGroup.deskWidth / 2 + padding,
+                top: anchorGroup.layout.y - anchorGroup.deskHeight / 2 - padding,
+                bottom: anchorGroup.layout.y + anchorGroup.deskHeight / 2 + padding
+            });
+        });
+        return obstacles;
     }
 
     indexFacilities(facilities) {
@@ -403,6 +516,9 @@ export class CanvasOfficeScene {
                     homeY: layout.y + world.y,
                     deskX: layout.x,
                     deskY: layout.y,
+                    deskWidth,
+                    deskHeight,
+                    homeSide: local.y >= 0 ? 1 : -1,
                     zone: layout.zone,
                     rotation
                 };
@@ -843,28 +959,325 @@ export class CanvasOfficeScene {
     }
 
     buildPath(actor, destination, travelKind) {
-        const corridorY = travelKind === 'boss'
-            ? Math.max(96, Math.min(this.bounds.height * 0.32, this.bounds.height - 120))
-            : Math.max(120, Math.min(this.bounds.height * 0.58, this.bounds.height - 120));
+        const corridor = this.getPrimaryCorridor();
+        const corridorY = corridor
+            ? corridor.y + corridor.height / 2
+            : (travelKind === 'boss'
+                ? Math.max(96, Math.min(this.bounds.height * 0.32, this.bounds.height - 120))
+                : Math.max(120, Math.min(this.bounds.height * 0.58, this.bounds.height - 120)));
         const start = { x: actor.x, y: actor.y };
         const queueX = Number.isFinite(destination.queueX) ? destination.queueX : destination.x;
         const queueY = Number.isFinite(destination.queueY) ? destination.queueY : destination.y;
-        const approachY = this.clampNumber(corridorY + this.routeOffset(actor.key, `${travelKind}:approachY`, 26), 80, this.bounds.height - 80);
-        const startLaneX = this.clampNumber(start.x + this.routeOffset(actor.key, `${travelKind}:startLane`, 24), 40, this.bounds.width - 40);
-        const queueLaneX = this.clampNumber(queueX + this.routeOffset(actor.key, `${travelKind}:queueLane`, 20), 40, this.bounds.width - 40);
+        const startLaneX = this.clampNumber(
+            start.x + this.routeOffset(actor.key, `${travelKind}:startLane`, 24),
+            corridor ? corridor.x + 26 : 40,
+            corridor ? corridor.x + corridor.width - 26 : this.bounds.width - 40
+        );
+        const queueLaneX = this.clampNumber(
+            queueX + this.routeOffset(actor.key, `${travelKind}:queueLane`, 20),
+            corridor ? corridor.x + 26 : 40,
+            corridor ? corridor.x + corridor.width - 26 : this.bounds.width - 40
+        );
+        const approachY = this.resolveSafeLaneY(actor, travelKind, corridorY, startLaneX, queueLaneX, queueX, queueY, corridor);
         const points = [];
+        const exitPoints = this.getDeskExitPath(actor, startLaneX, approachY);
 
-        if (Math.abs(start.x - startLaneX) > 8 || Math.abs(start.y - approachY) > 8) {
-            points.push({ x: startLaneX, y: approachY });
-        }
-        if (Math.abs(queueLaneX - startLaneX) > 8) {
-            points.push({ x: queueLaneX, y: approachY });
-        }
-        if (Math.abs(queueY - approachY) > 8) {
-            points.push({ x: queueX, y: queueY });
-        }
-        points.push({ x: destination.x, y: destination.y });
+        exitPoints.forEach((point) => {
+            const previous = points.length > 0 ? points[points.length - 1] : start;
+            if (Math.abs(previous.x - point.x) > 6 || Math.abs(previous.y - point.y) > 6) {
+                points.push(point);
+            }
+        });
+
+        const exitPoint = points.length > 0 ? points[points.length - 1] : start;
+        const laneEntryPoint = { x: startLaneX, y: approachY };
+        const queueLanePoint = { x: queueLaneX, y: approachY };
+        const queuePoint = { x: queueX, y: queueY };
+        const destinationPoint = { x: destination.x, y: destination.y };
+
+        this.appendObstacleAwareSegment(points, exitPoint, laneEntryPoint);
+        this.appendObstacleAwareSegment(points, laneEntryPoint, queueLanePoint);
+        this.appendObstacleAwareSegment(points, queueLanePoint, queuePoint);
+        this.appendObstacleAwareSegment(points, queuePoint, destinationPoint);
         return this.smoothPath(start, points);
+    }
+
+    getPrimaryCorridor() {
+        const zones = Array.isArray(this.layout?.zones) ? this.layout.zones : [];
+        return zones.find((zone) => zone.kind === 'corridor') || null;
+    }
+
+    getDeskExitPath(actor, laneX, approachY) {
+        const anchor = actor?.anchor;
+        if (!anchor) {
+            return [{ x: actor.x, y: approachY }];
+        }
+
+        const side = anchor.homeSide || (actor.homeY >= actor.deskY ? 1 : -1);
+        const horizontalSide = laneX >= actor.deskX ? 1 : -1;
+        const clearanceX = actor.deskX + horizontalSide * (anchor.deskWidth / 2 + 34);
+        const clearanceY = actor.deskY + side * (anchor.deskHeight / 2 + 34);
+        const laneTargetY = side > 0
+            ? Math.max(clearanceY, approachY)
+            : Math.min(clearanceY, approachY);
+
+        return [
+            { x: clearanceX, y: actor.homeY },
+            { x: clearanceX, y: laneTargetY }
+        ];
+    }
+
+    getDeskEntryPath(actor) {
+        const anchor = actor?.anchor;
+        if (!anchor) {
+            return [{ x: actor.homeX, y: actor.homeY }];
+        }
+
+        const side = anchor.homeSide || (actor.homeY >= actor.deskY ? 1 : -1);
+        const horizontalSide = actor.x >= actor.deskX ? 1 : -1;
+        const clearanceX = actor.deskX + horizontalSide * (anchor.deskWidth / 2 + 34);
+        const clearanceY = actor.deskY + side * (anchor.deskHeight / 2 + 34);
+        return [
+            { x: clearanceX, y: clearanceY },
+            { x: clearanceX, y: actor.homeY },
+            { x: actor.homeX, y: actor.homeY }
+        ];
+    }
+
+    appendObstacleAwareSegment(points, start, end) {
+        const segment = this.findObstacleAwarePath(start, end);
+        segment.forEach((point) => {
+            const previous = points.length > 0 ? points[points.length - 1] : start;
+            if (Math.abs(previous.x - point.x) > 4 || Math.abs(previous.y - point.y) > 4) {
+                points.push(point);
+            }
+        });
+    }
+
+    findObstacleAwarePath(start, end) {
+        if (Math.hypot(end.x - start.x, end.y - start.y) < 6) {
+            return [];
+        }
+
+        const cellSize = 28;
+        const cols = Math.max(1, Math.ceil(this.bounds.width / cellSize));
+        const rows = Math.max(1, Math.ceil(this.bounds.height / cellSize));
+        const startCell = this.toPathCell(start, cellSize, cols, rows);
+        const endCell = this.toPathCell(end, cellSize, cols, rows);
+
+        if (startCell.col === endCell.col && startCell.row === endCell.row) {
+            return [{ x: end.x, y: end.y }];
+        }
+
+        const open = [];
+        const openMeta = new Map();
+        const cameFrom = new Map();
+        const gScore = new Map();
+        const startKey = this.pathCellKey(startCell.col, startCell.row);
+        const endKey = this.pathCellKey(endCell.col, endCell.row);
+
+        gScore.set(startKey, 0);
+        open.push({
+            col: startCell.col,
+            row: startCell.row,
+            f: this.pathHeuristic(startCell, endCell)
+        });
+        openMeta.set(startKey, open[0]);
+
+        const directions = [
+            { col: 1, row: 0 },
+            { col: -1, row: 0 },
+            { col: 0, row: 1 },
+            { col: 0, row: -1 }
+        ];
+
+        while (open.length > 0) {
+            let bestIndex = 0;
+            for (let index = 1; index < open.length; index += 1) {
+                if (open[index].f < open[bestIndex].f) {
+                    bestIndex = index;
+                }
+            }
+
+            const current = open.splice(bestIndex, 1)[0];
+            const currentKey = this.pathCellKey(current.col, current.row);
+            openMeta.delete(currentKey);
+
+            if (currentKey === endKey) {
+                return this.reconstructPathPoints(cameFrom, current, start, end, cellSize);
+            }
+
+            const currentG = gScore.get(currentKey) || 0;
+            directions.forEach((direction) => {
+                const nextCol = current.col + direction.col;
+                const nextRow = current.row + direction.row;
+                if (nextCol < 0 || nextCol >= cols || nextRow < 0 || nextRow >= rows) {
+                    return;
+                }
+
+                if (this.isPathCellBlocked(nextCol, nextRow, cellSize, startCell, endCell)) {
+                    return;
+                }
+
+                const nextKey = this.pathCellKey(nextCol, nextRow);
+                const tentativeG = currentG + 1;
+                if (tentativeG >= (gScore.get(nextKey) ?? Number.POSITIVE_INFINITY)) {
+                    return;
+                }
+
+                cameFrom.set(nextKey, { col: current.col, row: current.row });
+                gScore.set(nextKey, tentativeG);
+                const nextNode = {
+                    col: nextCol,
+                    row: nextRow,
+                    f: tentativeG + this.pathHeuristic({ col: nextCol, row: nextRow }, endCell)
+                };
+                const existing = openMeta.get(nextKey);
+                if (existing) {
+                    existing.f = nextNode.f;
+                } else {
+                    open.push(nextNode);
+                    openMeta.set(nextKey, nextNode);
+                }
+            });
+        }
+
+        return [{ x: end.x, y: end.y }];
+    }
+
+    reconstructPathPoints(cameFrom, current, start, end, cellSize) {
+        const cells = [{ col: current.col, row: current.row }];
+        let cursorKey = this.pathCellKey(current.col, current.row);
+
+        while (cameFrom.has(cursorKey)) {
+            const previous = cameFrom.get(cursorKey);
+            cells.push(previous);
+            cursorKey = this.pathCellKey(previous.col, previous.row);
+        }
+
+        cells.reverse();
+        const points = [];
+        let lastDirection = '';
+
+        for (let index = 1; index < cells.length; index += 1) {
+            const previous = cells[index - 1];
+            const cell = cells[index];
+            const direction = cell.col !== previous.col ? `x:${Math.sign(cell.col - previous.col)}` : `y:${Math.sign(cell.row - previous.row)}`;
+            const center = this.pathCellCenter(cell.col, cell.row, cellSize);
+            if (direction !== lastDirection || index === cells.length - 1) {
+                points.push(center);
+                lastDirection = direction;
+            } else {
+                points[points.length - 1] = center;
+            }
+        }
+
+        if (points.length === 0) {
+            points.push({ x: end.x, y: end.y });
+        } else {
+            points[points.length - 1] = { x: end.x, y: end.y };
+        }
+
+        return points.filter((point) => Math.hypot(point.x - start.x, point.y - start.y) > 4);
+    }
+
+    toPathCell(point, cellSize, cols, rows) {
+        return {
+            col: this.clampNumber(Math.floor(point.x / cellSize), 0, cols - 1),
+            row: this.clampNumber(Math.floor(point.y / cellSize), 0, rows - 1)
+        };
+    }
+
+    pathCellCenter(col, row, cellSize) {
+        return {
+            x: col * cellSize + cellSize / 2,
+            y: row * cellSize + cellSize / 2
+        };
+    }
+
+    pathCellKey(col, row) {
+        return `${col},${row}`;
+    }
+
+    pathHeuristic(a, b) {
+        return Math.abs(a.col - b.col) + Math.abs(a.row - b.row);
+    }
+
+    isPathCellBlocked(col, row, cellSize, startCell, endCell) {
+        if ((col === startCell.col && row === startCell.row) || (col === endCell.col && row === endCell.row)) {
+            return false;
+        }
+
+        const left = col * cellSize;
+        const right = left + cellSize;
+        const top = row * cellSize;
+        const bottom = top + cellSize;
+
+        return this.deskObstacles.some((obstacle) => !(
+            right < obstacle.left ||
+            left > obstacle.right ||
+            bottom < obstacle.top ||
+            top > obstacle.bottom
+        ));
+    }
+
+    resolveSafeLaneY(actor, travelKind, corridorY, startLaneX, queueLaneX, queueX, queueY, corridor) {
+        const fallbackMin = corridor ? corridor.y + 24 : 80;
+        const fallbackMax = corridor ? corridor.y + corridor.height - 24 : this.bounds.height - 80;
+        const spread = corridor ? Math.max(10, Math.floor(corridor.height * 0.18)) : 26;
+        const baseY = this.clampNumber(
+            corridorY + this.routeOffset(actor.key, `${travelKind}:approachY`, spread),
+            fallbackMin,
+            fallbackMax
+        );
+        const candidates = [baseY];
+
+        for (let step = 1; step <= 6; step += 1) {
+            const offset = step * 18;
+            candidates.push(this.clampNumber(baseY - offset, fallbackMin, fallbackMax));
+            candidates.push(this.clampNumber(baseY + offset, fallbackMin, fallbackMax));
+        }
+
+        const uniqueCandidates = [];
+        candidates.forEach((candidate) => {
+            if (!uniqueCandidates.some((existing) => Math.abs(existing - candidate) < 2)) {
+                uniqueCandidates.push(candidate);
+            }
+        });
+
+        for (const candidate of uniqueCandidates) {
+            if (this.isLaneYClear(actor, candidate, startLaneX, queueLaneX, queueX, queueY)) {
+                return candidate;
+            }
+        }
+
+        return baseY;
+    }
+
+    isLaneYClear(actor, laneY, startLaneX, queueLaneX, queueX, queueY) {
+        const startX = actor?.deskX ?? actor?.x ?? 0;
+        const spans = [
+            [Math.min(startLaneX, queueLaneX), Math.max(startLaneX, queueLaneX)],
+            [Math.min(queueLaneX, queueX), Math.max(queueLaneX, queueX)]
+        ];
+
+        return !this.deskObstacles.some((obstacle) => {
+            const verticalCollision = laneY >= obstacle.top && laneY <= obstacle.bottom;
+            if (!verticalCollision) {
+                return false;
+            }
+
+            const startSpan = [Math.min(startX, startLaneX), Math.max(startX, startLaneX)];
+            const queueSpan = [Math.min(queueLaneX, queueX), Math.max(queueLaneX, queueX)];
+            const intersectsStart = this.rangeIntersects(startSpan[0], startSpan[1], obstacle.left, obstacle.right);
+            const intersectsHorizontal = spans.some((span) => this.rangeIntersects(span[0], span[1], obstacle.left, obstacle.right));
+            const intersectsQueue = this.rangeIntersects(queueSpan[0], queueSpan[1], obstacle.left, obstacle.right) && queueY >= obstacle.top && queueY <= obstacle.bottom;
+            return intersectsStart || intersectsHorizontal || intersectsQueue;
+        });
+    }
+
+    rangeIntersects(aMin, aMax, bMin, bMax) {
+        return !(aMax < bMin || aMin > bMax);
     }
 
     updateActors(deltaMs, now) {
@@ -968,7 +1381,7 @@ export class CanvasOfficeScene {
         actor.behavior = returnFromBoss
             ? (actor.pauseType === 'boss-lead' ? 'returning-boss-lead' : 'returning-boss')
             : 'returning-leisure';
-        actor.path = this.buildPath(actor, { x: actor.homeX, y: actor.homeY }, returnFromBoss ? 'boss' : 'desk');
+        actor.path = this.buildReturnPath(actor, returnFromBoss ? 'boss' : 'desk');
         actor.pathIndex = 0;
         if (returnFromBoss) {
             this.markInteractionCompleted(actor, Date.now());
@@ -978,6 +1391,16 @@ export class CanvasOfficeScene {
         if (actor.behavior === 'returning-leisure') {
             actor.cooldownUntil = Date.now() + this.randomRange(actor.key, LEISURE_COOLDOWN_MIN_MS, LEISURE_COOLDOWN_MAX_MS);
         }
+    }
+
+    buildReturnPath(actor, travelKind) {
+        const entryPath = this.getDeskEntryPath(actor);
+        const entryPoint = entryPath[0] || { x: actor.homeX, y: actor.homeY };
+        const path = this.buildPath(actor, { x: entryPoint.x, y: entryPoint.y }, travelKind);
+        entryPath.slice(1).forEach((point) => {
+            path.push(point);
+        });
+        return this.smoothPath({ x: actor.x, y: actor.y }, path);
     }
 
     markInteractionCompleted(actor, now) {
@@ -1034,25 +1457,28 @@ export class CanvasOfficeScene {
     smoothPath(start, points) {
         const result = [];
         let previous = { x: start.x, y: start.y };
+        let previousDirection = '';
 
-        points.forEach((point, index) => {
+        points.forEach((point) => {
             const current = { x: point.x, y: point.y };
-            if (Math.hypot(current.x - previous.x, current.y - previous.y) < 6) {
+            const dx = current.x - previous.x;
+            const dy = current.y - previous.y;
+            if (Math.hypot(dx, dy) < 6) {
                 previous = current;
                 return;
             }
 
-            if (index > 0) {
-                const blended = {
-                    x: previous.x + (current.x - previous.x) * 0.45,
-                    y: previous.y + (current.y - previous.y) * 0.45
-                };
-                if (Math.hypot(blended.x - previous.x, blended.y - previous.y) > 5) {
-                    result.push(blended);
-                }
+            const direction = Math.abs(dx) >= Math.abs(dy)
+                ? `x:${Math.sign(dx) || 0}`
+                : `y:${Math.sign(dy) || 0}`;
+
+            if (result.length > 0 && direction === previousDirection) {
+                result[result.length - 1] = current;
+            } else {
+                result.push(current);
+                previousDirection = direction;
             }
 
-            result.push(current);
             previous = current;
         });
 
@@ -1235,8 +1661,10 @@ export class CanvasOfficeScene {
         this.drawFacilities(ctx, this.layout.facilities || []);
         this.drawTeams(ctx, timestamp, this.currentState.teams || []);
         this.drawInteractions(ctx, timestamp);
+        this.drawDebugOverlay(ctx);
 
         ctx.restore();
+        this.drawDebugHud(ctx);
     }
 
     drawEmptyState(ctx) {
@@ -1249,17 +1677,135 @@ export class CanvasOfficeScene {
     drawZones(ctx, zones) {
         zones.forEach((zone) => {
             ctx.save();
-            ctx.fillStyle = this.withAlpha(zone.color, 0.28);
-            ctx.strokeStyle = this.withAlpha(zone.color, 0.7);
-            ctx.lineWidth = 2;
-            ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
-            ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
-            ctx.fillStyle = '#666666';
-            ctx.font = ZONE_LABEL_FONT;
-            ctx.textAlign = 'center';
-            ctx.fillText(zone.name, zone.x + zone.width / 2, zone.y + 36);
+            if (zone.kind === 'corridor') {
+                this.roundRect(ctx, zone.x, zone.y, zone.width, zone.height, 28);
+                ctx.fillStyle = this.withAlpha(zone.color, 0.18);
+                ctx.fill();
+                ctx.strokeStyle = this.withAlpha(zone.color, 0.48);
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.strokeStyle = this.withAlpha(zone.color, 0.58);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([14, 18]);
+                ctx.beginPath();
+                ctx.moveTo(zone.x + 32, zone.y + 18);
+                ctx.lineTo(zone.x + zone.width - 32, zone.y + 18);
+                ctx.moveTo(zone.x + 32, zone.y + zone.height - 18);
+                ctx.lineTo(zone.x + zone.width - 32, zone.y + zone.height - 18);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            else if (zone.kind === 'entry') {
+                this.roundRect(ctx, zone.x, zone.y, zone.width, zone.height, 22);
+                ctx.fillStyle = this.withAlpha(zone.color, 0.14);
+                ctx.fill();
+                ctx.strokeStyle = this.withAlpha(zone.color, 0.34);
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                ctx.strokeStyle = this.withAlpha(zone.color, 0.3);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([10, 12]);
+                ctx.beginPath();
+                ctx.moveTo(zone.x + zone.width / 2, zone.y + 16);
+                ctx.lineTo(zone.x + zone.width / 2, zone.y + zone.height - 16);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const seamX = zone.side === 'right' ? zone.x : zone.x + zone.width;
+                ctx.strokeStyle = this.withAlpha(zone.color, 0.42);
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(seamX, zone.y + 22);
+                ctx.lineTo(seamX, zone.y + zone.height - 22);
+                ctx.stroke();
+            }
+            else {
+                ctx.fillStyle = this.withAlpha(zone.color, 0.28);
+                ctx.strokeStyle = this.withAlpha(zone.color, 0.7);
+                ctx.lineWidth = 2;
+                ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
+                ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+                ctx.fillStyle = '#666666';
+                ctx.font = ZONE_LABEL_FONT;
+                ctx.textAlign = 'center';
+                ctx.fillText(zone.name, zone.x + zone.width / 2, zone.y + 36);
+            }
             ctx.restore();
         });
+    }
+
+    drawDebugOverlay(ctx) {
+        if (!this.debugPathsVisible) {
+            return;
+        }
+
+        this.drawDeskObstacles(ctx);
+        this.drawActorPaths(ctx);
+    }
+
+    drawDeskObstacles(ctx) {
+        this.deskObstacles.forEach((obstacle) => {
+            ctx.save();
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+            ctx.strokeStyle = 'rgba(220, 38, 38, 0.45)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([8, 6]);
+            ctx.fillRect(obstacle.left, obstacle.top, obstacle.right - obstacle.left, obstacle.bottom - obstacle.top);
+            ctx.strokeRect(obstacle.left, obstacle.top, obstacle.right - obstacle.left, obstacle.bottom - obstacle.top);
+            ctx.setLineDash([]);
+            ctx.restore();
+        });
+    }
+
+    drawActorPaths(ctx) {
+        this.actorStates.forEach((actor) => {
+            const remaining = Array.isArray(actor.path) ? actor.path.slice(actor.pathIndex) : [];
+            if (!remaining.length) {
+                return;
+            }
+
+            const isSelected = actor.key === this.selectedActorKey;
+            ctx.save();
+            ctx.strokeStyle = isSelected ? 'rgba(37, 99, 235, 0.95)' : 'rgba(14, 165, 233, 0.62)';
+            ctx.lineWidth = isSelected ? 3 : 2;
+            ctx.setLineDash(isSelected ? [] : [6, 5]);
+            ctx.beginPath();
+            ctx.moveTo(actor.x, actor.y);
+            remaining.forEach((point) => {
+                ctx.lineTo(point.x, point.y);
+            });
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            remaining.forEach((point, index) => {
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, index === remaining.length - 1 ? 4.5 : 3.2, 0, Math.PI * 2);
+                ctx.fillStyle = index === remaining.length - 1 ? 'rgba(22, 163, 74, 0.9)' : 'rgba(59, 130, 246, 0.78)';
+                ctx.fill();
+            });
+            ctx.restore();
+        });
+    }
+
+    drawDebugHud(ctx) {
+        if (!this.debugPathsVisible) {
+            return;
+        }
+
+        ctx.save();
+        this.roundRect(ctx, 16, 14, 222, 34, 10);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = '600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('路径调试已开启  Ctrl+Shift+D 关闭', 28, 36);
+        ctx.restore();
     }
 
     drawFacilities(ctx, facilities) {
@@ -1310,19 +1856,27 @@ export class CanvasOfficeScene {
 
         const members = Array.isArray(team.members) ? team.members : [];
         const { layout, deskWidth, deskHeight, rotation } = anchorGroup;
+        const deskTheme = this.getDeskTheme(layout.provider || team.provider || anchorGroup.members?.[0]?.provider || '');
 
         ctx.save();
         ctx.translate(layout.x, layout.y);
         ctx.rotate(rotation);
 
-        this.roundRect(ctx, -deskWidth / 2, -deskHeight / 2, deskWidth, deskHeight, 6);
-        ctx.fillStyle = '#8b4513';
+        this.roundRect(ctx, -deskWidth / 2 - 18, -deskHeight / 2 - 18, deskWidth + 36, deskHeight + 74, 18);
+        ctx.fillStyle = deskTheme.platformFill;
         ctx.fill();
-        ctx.strokeStyle = '#654321';
+        ctx.strokeStyle = deskTheme.platformStroke;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        this.roundRect(ctx, -deskWidth / 2, -deskHeight / 2, deskWidth, deskHeight, 6);
+        ctx.fillStyle = deskTheme.fill;
+        ctx.fill();
+        ctx.strokeStyle = deskTheme.stroke;
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        ctx.strokeStyle = 'rgba(101,67,33,0.35)';
+        ctx.strokeStyle = deskTheme.line;
         ctx.lineWidth = 1;
         for (let i = 0; i < 3; i += 1) {
             const offsetY = -deskHeight / 2 + ((i + 1) * deskHeight) / 4;
@@ -1336,9 +1890,9 @@ export class CanvasOfficeScene {
         for (let i = 0; i < members.length; i += 1) {
             const offsetX = -deskWidth / 2 + spacing * (i + 1);
             this.roundRect(ctx, offsetX - 15, -20, 30, 20, 4);
-            ctx.fillStyle = '#333333';
+            ctx.fillStyle = deskTheme.monitorFill;
             ctx.fill();
-            ctx.strokeStyle = '#666666';
+            ctx.strokeStyle = deskTheme.monitorStroke;
             ctx.lineWidth = 1;
             ctx.stroke();
         }
@@ -1355,6 +1909,14 @@ export class CanvasOfficeScene {
                 this.drawAgent(ctx, timestamp, actor);
             }
         });
+    }
+
+    getDeskTheme(provider) {
+        const key = String(provider || '').toLowerCase();
+        if (key === 'claude' || key === 'codex' || key === 'openclaw') {
+            return TEAM_DESK_THEME[key];
+        }
+        return TEAM_DESK_THEME.unknown;
     }
 
     drawInteractions(ctx, timestamp) {
@@ -1797,6 +2359,7 @@ export class CanvasOfficeScene {
         window.removeEventListener('pointermove', this.handlePointerMove);
         window.removeEventListener('pointerup', this.handlePointerUp);
         window.removeEventListener('pointercancel', this.handlePointerUp);
+        window.removeEventListener('keydown', this.handleKeyDown);
 
         if (this.dataSyncManager) {
             this.dataSyncManager.stop();

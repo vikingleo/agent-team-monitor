@@ -4,25 +4,41 @@ export class DataSyncManager {
         this.pollInterval = 1000;
         this.timer = null;
         this.lastState = null;
+        this.desktopBridge = window.AgentMonitorDesktopBridge || null;
+        this.isDesktopMode = Boolean(this.desktopBridge && this.desktopBridge.isDesktopModeEnabled());
     }
 
     start() {
+        if (this.isDesktopMode && this.desktopBridge) {
+            this.timer = this.desktopBridge.startDesktopPolling(() => this.fetchAndUpdate(), this.pollInterval);
+            return;
+        }
+
         this.fetchAndUpdate();
         this.timer = setInterval(() => this.fetchAndUpdate(), this.pollInterval);
     }
 
     stop() {
         if (this.timer) {
-            clearInterval(this.timer);
+            if (typeof this.timer === 'function') {
+                this.timer();
+            } else {
+                clearInterval(this.timer);
+            }
             this.timer = null;
         }
     }
 
     async fetchAndUpdate() {
         try {
-            const response = await fetch('/api/state?_ts=' + Date.now());
-            if (!response.ok) throw new Error('API error');
-            const rawState = await response.json();
+            let rawState;
+            if (this.isDesktopMode && this.desktopBridge) {
+                rawState = await this.desktopBridge.fetchDesktopState();
+            } else {
+                const response = await fetch('/api/state?_ts=' + Date.now());
+                if (!response.ok) throw new Error('API error');
+                rawState = await response.json();
+            }
             const newState = typeof this.scene.prepareState === 'function'
                 ? this.scene.prepareState(rawState)
                 : rawState;

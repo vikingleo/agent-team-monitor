@@ -1,18 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/liaoweijun/agent-team-monitor/pkg/api"
-	"github.com/liaoweijun/agent-team-monitor/pkg/monitor"
-	"github.com/liaoweijun/agent-team-monitor/pkg/ui"
-	"github.com/liaoweijun/agent-team-monitor/web"
+	agentapp "github.com/liaoweijun/agent-team-monitor/internal/app"
 )
 
 var (
@@ -28,84 +25,41 @@ const appName = "Agent Team Monitor"
 func main() {
 	flag.Parse()
 
-	// Show version
 	if *version {
-		fmt.Printf("%s v%s\n", appName, appVersion)
+		fmt.Println(agentapp.FormatVersionLabel(appName, appVersion))
 		os.Exit(0)
 	}
 
-	providerMode, err := monitor.ParseProviderMode(*provider)
-	if err != nil {
-		log.Fatalf("Invalid provider mode: %v", err)
-	}
-
-	// Create collector
-	collector, err := monitor.NewCollectorWithOptions(monitor.CollectorOptions{
-		Provider: providerMode,
-	})
-	if err != nil {
-		log.Fatalf("Failed to create collector: %v", err)
-	}
-
-	// Start collecting data
-	if err := collector.Start(); err != nil {
-		log.Fatalf("Failed to start collector: %v", err)
-	}
-	defer collector.Stop()
-
-	// Setup signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if *webMode {
-		// Run in web mode
-		runWebMode(collector, sigChan)
-	} else {
-		// Run in TUI mode
-		runTUIMode(collector, sigChan)
+		runWebMode(ctx)
+		return
 	}
+
+	runTUIMode(ctx)
 }
 
-func runTUIMode(collector *monitor.Collector, sigChan chan os.Signal) {
-	go func() {
-		<-sigChan
-		fmt.Println("\nShutting down...")
-		collector.Stop()
-		os.Exit(0)
-	}()
-
-	// Run TUI
-	if err := ui.Run(collector); err != nil {
+func runTUIMode(ctx context.Context) {
+	if err := agentapp.RunTUI(ctx, *provider); err != nil {
 		log.Fatalf("Error running TUI: %v", err)
 	}
 }
 
-func runWebMode(collector *monitor.Collector, sigChan chan os.Signal) {
-	// Create embedded static filesystem
-	staticFS, err := fs.Sub(web.StaticFiles, "static")
+func runWebMode(ctx context.Context) {
+	session, err := agentapp.StartWeb(*provider, *webAddr)
 	if err != nil {
-		log.Fatalf("Failed to load embedded static files: %v", err)
+		log.Fatalf("Error starting web server: %v", err)
 	}
+	defer session.Stop()
 
-	// Create and start web server
-	server := api.NewServer(collector, *webAddr, staticFS)
-
-	// Handle shutdown
-	go func() {
-		<-sigChan
-		fmt.Println("\nShutting down web server...")
-		if err := server.Stop(); err != nil {
-			log.Printf("Error stopping server: %v", err)
-		}
-		collector.Stop()
-		os.Exit(0)
-	}()
-
-	// Start server
-	fmt.Printf("Web dashboard available at http://localhost%s\n", *webAddr)
+	fmt.Printf("Web dashboard available at %s\n", session.BaseURL)
 	fmt.Println("Press Ctrl+C to stop")
 
-	if err := server.Start(); err != nil {
-		log.Fatalf("Error starting web server: %v", err)
+	<-ctx.Done()
+	fmt.Println("\nShutting down web server...")
+	if err := session.Stop(); err != nil {
+		log.Printf("Error stopping server: %v", err)
 	}
 }

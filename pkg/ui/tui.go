@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -530,7 +532,21 @@ func (m model) formatTaskStatus(status string) string {
 
 // Run starts the TUI application
 func Run(collector *monitor.Collector) error {
-	p := tea.NewProgram(NewModel(collector), tea.WithAltScreen())
+	return RunWithContext(context.Background(), collector)
+}
+
+// RunWithContext starts the TUI application and exits cleanly when the context is canceled.
+func RunWithContext(ctx context.Context, collector *monitor.Collector) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	p := tea.NewProgram(NewModel(collector), tea.WithAltScreen(), tea.WithContext(ctx))
 	_, err := p.Run()
+
+	if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
+		return nil
+	}
+
 	return err
 }

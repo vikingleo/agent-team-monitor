@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Agent Team Monitor
+Comment=Open Agent Team Monitor in a native desktop window
+Exec=__APP_EXEC__
+Icon=agent-team-monitor
+Terminal=false
+Categories=Development;Monitor;
+Keywords=agent;monitor;claude;codex;openclaw;
+StartupNotify=true
+StartupWMClass=agent-team-monitor-desktop

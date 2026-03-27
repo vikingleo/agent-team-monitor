@@ -1,5 +1,6 @@
 import { Sidebar } from '../components/Sidebar.js';
 import { CanvasOfficeScene } from './scenes/CanvasOfficeScene.js';
+import { getDesktopPreferences, initDesktopUI } from '../desktop-ui.js';
 
 class Game {
     constructor() {
@@ -11,6 +12,23 @@ class Game {
 
     async init() {
         try {
+            await initDesktopUI({
+                onRefresh: () => {
+                    if (this.scene?.dataSyncManager) {
+                        this.scene.dataSyncManager.fetchAndUpdate();
+                    }
+                },
+                onPreferencesChanged: (preferences) => {
+                    if (this.scene) {
+                        this.scene.desktopPreferences = { ...preferences };
+                        if (this.scene.dataSyncManager) {
+                            this.scene.dataSyncManager.lastState = null;
+                            this.scene.dataSyncManager.fetchAndUpdate();
+                        }
+                    }
+                }
+            });
+
             const container = document.getElementById('game-container');
             if (!container) {
                 throw new Error('Game container not found');
@@ -22,6 +40,7 @@ class Game {
 
             this.sidebar = new Sidebar();
             this.scene = new CanvasOfficeScene(this.canvas);
+            this.scene.desktopPreferences = getDesktopPreferences();
             this.scene.onStateUpdated = (state) => {
                 if (this.sidebar) {
                     this.sidebar.updateState(state);

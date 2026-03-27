@@ -1,0 +1,9 @@
+Package: agent-team-monitor
+Version: __VERSION__
+Section: utils
+Priority: optional
+Architecture: __ARCH__
+Maintainer: Agent Team Monitor Maintainers
+Depends: libgtk-3-0t64, libwebkit2gtk-4.1-0, xdg-utils, libnotify-bin, libayatana-appindicator3-1
+Description: Desktop app and CLI monitor for Claude, Codex, and OpenClaw agent teams
+ A Linux desktop shell app that embeds the full Web monitor, plus CLI and Web modes.

@@ -7,6 +7,7 @@ type TeamInfo struct {
 	Name          string      `json:"name"`
 	Provider      string      `json:"provider,omitempty"` // claude, codex, openclaw
 	CreatedAt     time.Time   `json:"created_at"`
+	SortKey       string      `json:"-"`
 	LeadSessionID string      `json:"lead_session_id,omitempty"`
 	ProjectCwd    string      `json:"project_cwd,omitempty"`
 	Members       []AgentInfo `json:"members"`

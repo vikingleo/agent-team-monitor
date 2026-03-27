@@ -6,7 +6,7 @@
 
 <a id="中文"></a>
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) + Codex 智能体团队实时监控面板。在终端或浏览器中追踪团队成员、任务状态、智能体思考过程、工具调用和进程信息。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) + Codex 智能体团队实时监控面板。在桌面窗口、终端或 Web 页面中追踪团队成员、任务状态、智能体思考过程、工具调用和进程信息。
 
 ## 截图
 
@@ -36,6 +36,38 @@ cd agent-team-monitor
 make build
 ```
 
+### 桌面应用
+
+```bash
+make build-desktop
+./bin/agent-team-monitor-desktop
+```
+
+桌面版会直接启动一个桌面壳应用窗口，在应用内完整显示现有 Web 监控页面和办公场景，不再调用外部浏览器。
+
+- 主窗口内完整加载 Web 监控面板和 `/game/` 办公场景
+- 保持 Web 界面的原有布局、动画、主题和交互，不做裁剪重写
+- 可通过 Ayatana AppIndicator 系统托盘在后台继续运行
+- 关闭窗口时可按设置隐藏到托盘，或直接退出应用
+- 桌面设置会持久化到本机配置目录，而不是依赖浏览器缓存
+- 提供独立的原生“设置”与“关于”窗口
+- 外部文档链接会交给系统默认浏览器打开
+- 支持系统通知：任务完成、成员长时间无活动
+
+当前桌面版与 Web 版共用同一套采集与监控数据，并直接复用同一套前端页面；桌面端额外补充托盘、桌面设置、系统通知和开机自启等能力。
+
+如果你希望它像普通 Linux 桌面软件一样出现在应用菜单、任务栏和搜索结果中，可以安装桌面入口和图标：
+
+```bash
+make install-desktop-entry
+```
+
+安装后会注册图标名 `agent-team-monitor`，同时：
+
+- Linux 桌面菜单会显示应用图标
+- 桌面窗口会使用相同应用图标
+- Web 页面标签会显示 favicon
+
 ### TUI 模式（默认）
 
 ```bash
@@ -61,11 +93,14 @@ make build
 # 自定义端口
 ./bin/agent-team-monitor -web -addr :3000
 
+# 随机端口
+./bin/agent-team-monitor -web -addr 127.0.0.1:0
+
 # Web + 仅 codex
 ./bin/agent-team-monitor -web -provider codex
 ```
 
-浏览器打开 `http://localhost:8080`。
+默认地址为 `http://localhost:8080`。如果使用随机端口，程序会打印实际地址，例如 `http://localhost:49152`。
 
 - 默认暗色监控面板：`/`
 - 办公场景游戏视图：`/game/`
@@ -172,6 +207,34 @@ make build-all
 
 输出 macOS (amd64/arm64) 和 Linux (amd64/arm64) 的二进制文件。
 
+Linux 桌面应用可单独构建：
+
+```bash
+make build-desktop
+```
+
+Linux 桌面入口可一并安装：
+
+```bash
+make install-desktop-entry
+```
+
+也可以直接构建 Debian 安装包：
+
+```bash
+make package-deb
+```
+
+构建后的 `.deb` 文件会输出到 `dist/` 目录。
+
+`.deb` 包内包含：
+
+- `/usr/bin/agent-team-monitor`
+- `/usr/bin/agent-team-monitor-desktop`
+- Linux desktop entry
+- 128/256/512 多尺寸图标
+- Debian changelog 与 copyright
+
 ## 技术栈
 
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) — 终端 UI
@@ -196,7 +259,7 @@ MIT
 
 ## English
 
-Real-time monitoring dashboard for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) + Codex agent teams. Track team members, tasks, agent thinking, tool usage, and processes — in your terminal or browser.
+Real-time monitoring dashboard for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) + Codex agent teams. Track team members, tasks, agent thinking, tool usage, and processes in a desktop window, terminal, or browser.
 
 ## Screenshots
 
@@ -226,6 +289,27 @@ cd agent-team-monitor
 make build
 ```
 
+### Desktop App
+
+```bash
+make build-desktop
+./bin/agent-team-monitor-desktop
+```
+
+The desktop build starts a native Linux GTK window and renders the monitoring panel directly inside the desktop app instead of launching an external browser.
+
+- It reads monitoring data directly from the collector instead of depending on an embedded browser view
+- The main team list, members, and task summaries are rendered by the desktop app itself
+- External links still open in your system browser
+- The app supports tray residency, close-to-tray, native settings/about windows, and desktop notifications
+- You can enable `开机自动启动桌面应用` and `启动时直接驻留托盘` from the desktop settings window
+
+To install a menu entry and icons for the current user:
+
+```bash
+make install-desktop-entry
+```
+
 ### TUI Mode (default)
 
 ```bash
@@ -251,15 +335,18 @@ make build
 # Custom port
 ./bin/agent-team-monitor -web -addr :3000
 
+# Random port
+./bin/agent-team-monitor -web -addr 127.0.0.1:0
+
 # Web + codex only
 ./bin/agent-team-monitor -web -provider codex
 ```
 
-Open `http://localhost:8080` in your browser.
+The default address is `http://localhost:8080`. When using a random port, the program prints the resolved address.
 
-- Dark dashboard: `/`
-- Office scene view: `/game/`
-- Single-address switching: `/?view=game`, `/game/?view=dark`
+The browser tab uses the packaged app favicon from `web/static/assets/favicon.png`.
+
+The Linux desktop app now runs as a desktop shell window that embeds the full Web dashboard and office scene instead of launching your browser.
 
 ## API Endpoints
 
@@ -324,6 +411,28 @@ make build-all
 ```
 
 Outputs binaries for macOS (amd64/arm64) and Linux (amd64/arm64).
+
+The Linux desktop app can be built separately:
+
+```bash
+make build-desktop
+```
+
+Install the Linux desktop entry and icons:
+
+```bash
+make install-desktop-entry
+```
+
+Build a Debian package:
+
+```bash
+make package-deb
+```
+
+The generated `.deb` is written to `dist/`.
+
+After installation, launch `Agent Team Monitor` from your desktop menu. In desktop mode it runs as a native Linux window rather than opening a browser tab, and it can continue running from the tray in the background.
 
 ## Tech Stack
 

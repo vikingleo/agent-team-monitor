@@ -1,13 +1,32 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Demo script for Agent Team Monitor
-# This script demonstrates both TUI and Web modes
+# This script demonstrates desktop, TUI, and Web modes.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY_PATH="$SCRIPT_DIR/agent-team-monitor"
+CLI_BINARY_PATH="$SCRIPT_DIR/bin/agent-team-monitor"
+DESKTOP_BINARY_PATH="$SCRIPT_DIR/bin/agent-team-monitor-desktop"
 cd "$SCRIPT_DIR"
+
+ensure_cli_binary() {
+    if [ -x "$CLI_BINARY_PATH" ]; then
+        return
+    fi
+
+    echo "🔧 CLI binary not found, building it with make build..."
+    make build
+}
+
+ensure_desktop_binary() {
+    if [ -x "$DESKTOP_BINARY_PATH" ] && [ -x "$CLI_BINARY_PATH" ]; then
+        return
+    fi
+
+    echo "🔧 Desktop app binary not found, building it with make build-desktop..."
+    make build-desktop
+}
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║                                                              ║"
@@ -16,15 +35,10 @@ echo "║                                                              ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Check if binary exists
-if [ ! -x "$BINARY_PATH" ]; then
-    echo "❌ Binary not found or not executable: $BINARY_PATH"
-    exit 1
-fi
-
 # Show version
 echo "📦 Version Information:"
-"$BINARY_PATH" -version
+ensure_cli_binary
+"$CLI_BINARY_PATH" -version
 echo ""
 
 # Create test data if needed
@@ -37,23 +51,34 @@ fi
 # Show menu
 echo "Please select a mode to run:"
 echo ""
-echo "1) TUI Mode (Terminal Interface)"
-echo "2) Web Mode (Browser Dashboard)"
-echo "3) Show Help"
-echo "4) Exit"
+echo "1) Desktop App (Native Window)"
+echo "2) TUI Mode (Terminal Interface)"
+echo "3) Web Mode (Local Dashboard Server)"
+echo "4) Show Help"
+echo "5) Exit"
 echo ""
-read -p "Enter your choice (1-4): " choice
+read -p "Enter your choice (1-5): " choice
 
 case $choice in
     1)
+        echo ""
+        echo "🪟 Starting desktop app..."
+        echo "A native window will open and embed the monitoring UI."
+        echo ""
+        sleep 2
+        ensure_desktop_binary
+        "$DESKTOP_BINARY_PATH"
+        ;;
+    2)
         echo ""
         echo "🖥️  Starting TUI mode..."
         echo "Press 'q' to quit"
         echo ""
         sleep 2
-        "$BINARY_PATH"
+        ensure_cli_binary
+        "$CLI_BINARY_PATH"
         ;;
-    2)
+    3)
         echo ""
         echo "🌐 Starting Web mode..."
         echo ""
@@ -69,30 +94,21 @@ case $choice in
         echo "Press Ctrl+C to stop"
         echo ""
         sleep 2
-
-        # Try to open browser
-        if command -v open &> /dev/null; then
-            # macOS
-            sleep 1 && open http://localhost:8080 &
-        elif command -v xdg-open &> /dev/null; then
-            # Linux
-            sleep 1 && xdg-open http://localhost:8080 &
-        fi
-
-        "$BINARY_PATH" -web
-        ;;
-    3)
-        echo ""
-        "$BINARY_PATH" -h
-        echo ""
-        echo "📚 Documentation:"
-        echo "   README.md        - Main documentation"
-        echo "   QUICKSTART.md    - Quick start guide"
-        echo "   WEB_GUIDE.md     - Web mode guide"
-        echo "   WEB_FEATURES.md  - Feature summary"
-        echo ""
+        ensure_cli_binary
+        "$CLI_BINARY_PATH" -web
         ;;
     4)
+        echo ""
+        ensure_cli_binary
+        "$CLI_BINARY_PATH" -h
+        echo ""
+        echo "📚 Documentation:"
+        echo "   README.md                - Main documentation"
+        echo "   TESTING.md               - Testing notes"
+        echo "   docs/web-ui-design.md    - Web UI design notes"
+        echo ""
+        ;;
+    5)
         echo ""
         echo "👋 Goodbye!"
         exit 0

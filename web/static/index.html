@@ -4,11 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Team 监控器</title>
+    <link rel="icon" type="image/png" href="/assets/favicon.png">
+    <link rel="apple-touch-icon" href="/assets/agent-team-monitor.png">
     <script>
         (() => {
             const storageKey = 'atm-dashboard-theme';
             try {
-                const storedTheme = localStorage.getItem(storageKey);
+                const desktopTheme = window.__ATM_DESKTOP_INITIAL_PREFERENCES__?.theme;
+                const storedTheme = desktopTheme || localStorage.getItem(storageKey);
                 if (storedTheme === 'light' || storedTheme === 'dark') {
                     document.documentElement.setAttribute('data-theme', storedTheme);
                 }
@@ -18,7 +21,7 @@
     </script>
     <link rel="stylesheet" href="/css/style.css">
 </head>
-<body>
+<body data-desktop-mode="0">
     <div class="container app-shell">
         <header>
             <h1>
@@ -31,13 +34,22 @@
             <div class="header-info">
                 <div class="header-controls">
                     <nav class="view-switcher" aria-label="视图切换">
-                        <a class="view-switcher-link active" href="/" aria-current="page">监控面板</a>
-                        <a class="view-switcher-link" href="/game/">办公场景</a>
+                        <a class="view-switcher-link active" href="/" data-desktop-target="/" aria-current="page">监控面板</a>
+                        <a class="view-switcher-link" href="/game/" data-desktop-target="/game/">办公场景</a>
                     </nav>
                     <div class="theme-switcher" role="group" aria-label="主题切换">
                         <button class="theme-switcher-button active" type="button" data-theme-choice="light" aria-pressed="true">亮色</button>
                         <button class="theme-switcher-button" type="button" data-theme-choice="dark" aria-pressed="false">暗色</button>
                     </div>
+                </div>
+                <div class="desktop-toolbar" id="desktop-toolbar" hidden>
+                    <span class="desktop-pill" id="desktop-context-pill">桌面应用</span>
+                    <span class="desktop-toolbar-view" id="desktop-current-view">监控面板</span>
+                    <button class="desktop-toolbar-button" id="desktop-settings-button" type="button">桌面设置</button>
+                    <button class="desktop-toolbar-button" id="desktop-about-button" type="button">关于</button>
+                    <button class="desktop-toolbar-button" id="desktop-refresh-button" type="button">立即刷新</button>
+                    <button class="desktop-toolbar-button" id="desktop-hide-button" type="button">隐藏到托盘</button>
+                    <button class="desktop-toolbar-button danger" id="desktop-quit-button" type="button">退出应用</button>
                 </div>
                 <div class="header-meta">
                     <span id="last-update">最后更新: --:--:--</span>
@@ -96,6 +108,51 @@
     </div>
 
     <nav id="team-nav" class="team-nav"></nav>
+    <div class="desktop-settings-panel" id="desktop-settings-panel" hidden>
+        <div class="desktop-settings-card">
+            <div class="desktop-settings-title">桌面设置</div>
+            <label class="desktop-settings-field" for="desktop-startup-view-select">
+                <span>默认启动视图</span>
+                <select id="desktop-startup-view-select">
+                    <option value="dashboard">监控面板</option>
+                    <option value="game">办公场景</option>
+                </select>
+            </label>
+            <label class="desktop-settings-field" for="desktop-provider-filter-select">
+                <span>团队来源筛选</span>
+                <select id="desktop-provider-filter-select">
+                    <option value="all">全部</option>
+                    <option value="claude">Claude</option>
+                    <option value="codex">Codex</option>
+                    <option value="openclaw">OpenClaw</option>
+                </select>
+            </label>
+            <label class="desktop-settings-option" for="desktop-hide-idle-toggle">
+                <input id="desktop-hide-idle-toggle" type="checkbox" checked>
+                桌面模式默认隐藏空闲成员
+            </label>
+            <label class="desktop-settings-option" for="desktop-notify-task-completion-toggle">
+                <input id="desktop-notify-task-completion-toggle" type="checkbox" checked>
+                任务完成时发送系统通知
+            </label>
+            <label class="desktop-settings-option" for="desktop-notify-stale-agents-toggle">
+                <input id="desktop-notify-stale-agents-toggle" type="checkbox" checked>
+                成员长时间无活动时通知
+            </label>
+            <label class="desktop-settings-option" for="desktop-close-to-tray-toggle">
+                <input id="desktop-close-to-tray-toggle" type="checkbox" checked>
+                关闭窗口时隐藏到托盘
+            </label>
+            <label class="desktop-settings-option" for="desktop-launch-on-login-toggle">
+                <input id="desktop-launch-on-login-toggle" type="checkbox">
+                开机自动启动桌面应用
+            </label>
+            <label class="desktop-settings-option" for="desktop-start-minimized-to-tray-toggle">
+                <input id="desktop-start-minimized-to-tray-toggle" type="checkbox">
+                启动时直接驻留托盘
+            </label>
+        </div>
+    </div>
     <div id="agent-detail-modal" class="agent-detail-modal" hidden>
         <div class="agent-detail-backdrop" data-close-agent-detail="true"></div>
         <div class="agent-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-detail-title">
@@ -108,6 +165,7 @@
             <div id="agent-detail-content" class="agent-detail-content"></div>
         </div>
     </div>
-    <script src="/js/app.js"></script>
+    <script src="/js/desktop-bridge.js"></script>
+    <script type="module" src="/js/app.js"></script>
 </body>
 </html>

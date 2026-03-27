@@ -167,6 +167,10 @@ func (c *Collector) updateState() {
 		allTeams = append(allTeams, openClawTeams...)
 	}
 
+	sort.SliceStable(allTeams, func(i, j int) bool {
+		return teamSortKey(allTeams[i]) < teamSortKey(allTeams[j])
+	})
+
 	// Update state
 	c.state.Teams = allTeams
 	c.state.Processes = processes
@@ -265,6 +269,7 @@ func (c *Collector) collectOpenClawTeams(homeDir string) []types.TeamInfo {
 		Name:      "openclaw",
 		Provider:  "openclaw",
 		CreatedAt: now,
+		SortKey:   "provider:openclaw",
 		Members:   make([]types.AgentInfo, 0, len(discovered)),
 		Tasks:     []types.TaskInfo{},
 	}
@@ -540,10 +545,6 @@ func (c *Collector) buildCodexTeams(discovered []parser.CodexSessionDiscovery, n
 		teams = append(teams, team)
 	}
 
-	sort.SliceStable(teams, func(i, j int) bool {
-		return latestTeamActivityTime(teams[i]).After(latestTeamActivityTime(teams[j]))
-	})
-
 	return teams
 }
 
@@ -650,11 +651,55 @@ func buildCodexTeam(group []codexSessionEnvelope) types.TeamInfo {
 		Name:          "codex-" + label,
 		Provider:      "codex",
 		CreatedAt:     createdAt,
+		SortKey:       codexTeamSortKey(group, label, projectCwd, leadSessionID),
 		LeadSessionID: leadSessionID,
 		ProjectCwd:    projectCwd,
 		Members:       members,
 		Tasks:         []types.TaskInfo{},
 	}
+}
+
+func teamSortKey(team types.TeamInfo) string {
+	if strings.TrimSpace(team.SortKey) != "" {
+		return strings.ToLower(strings.TrimSpace(team.SortKey))
+	}
+
+	if strings.TrimSpace(team.ConfigPath) != "" {
+		return "config:" + strings.ToLower(strings.TrimSpace(team.ConfigPath))
+	}
+	if strings.TrimSpace(team.ProjectCwd) != "" {
+		return "cwd:" + strings.ToLower(strings.TrimSpace(team.ProjectCwd))
+	}
+	if strings.TrimSpace(team.LeadSessionID) != "" {
+		return "session:" + strings.ToLower(strings.TrimSpace(team.LeadSessionID))
+	}
+	if strings.TrimSpace(team.Name) != "" {
+		return "name:" + strings.ToLower(strings.TrimSpace(team.Name))
+	}
+	return ""
+}
+
+func codexTeamSortKey(group []codexSessionEnvelope, label, projectCwd, leadSessionID string) string {
+	best := ""
+	for _, envelope := range group {
+		path := strings.TrimSpace(envelope.session.SessionPath)
+		if path == "" {
+			continue
+		}
+		if best == "" || strings.ToLower(path) < strings.ToLower(best) {
+			best = path
+		}
+	}
+	if best != "" {
+		return "codex:path:" + best
+	}
+	if strings.TrimSpace(projectCwd) != "" {
+		return "codex:cwd:" + strings.ToLower(strings.TrimSpace(projectCwd))
+	}
+	if strings.TrimSpace(leadSessionID) != "" {
+		return "codex:session:" + strings.ToLower(strings.TrimSpace(leadSessionID))
+	}
+	return "codex:name:" + strings.ToLower(strings.TrimSpace(label))
 }
 
 func pickDominantCodexLabel(group []codexSessionEnvelope, counts map[string]int) string {
@@ -875,6 +920,7 @@ func mergeTaskOnlyTeams(teams []types.TeamInfo, tasksDir string) []types.TeamInf
 		teams = append(teams, types.TeamInfo{
 			Name:          teamName,
 			CreatedAt:     createdAt,
+			SortKey:       "virtual:tasks:" + strings.ToLower(filepath.Join(tasksDir, teamName)),
 			LeadSessionID: leadSessionID,
 			Members:       []types.AgentInfo{},
 			Tasks:         []types.TaskInfo{},
@@ -937,6 +983,7 @@ func mergeInboxOnlyTeams(teams []types.TeamInfo, teamsDir string) []types.TeamIn
 		teams = append(teams, types.TeamInfo{
 			Name:          teamName,
 			CreatedAt:     createdAt,
+			SortKey:       "virtual:inbox:" + strings.ToLower(filepath.Join(teamsDir, teamName)),
 			LeadSessionID: leadSessionID,
 			Members:       []types.AgentInfo{},
 			Tasks:         []types.TaskInfo{},
@@ -1028,6 +1075,7 @@ func mergeDiscoveredProjectTeams(teams []types.TeamInfo, discovered []parser.Pro
 			teams = append(teams, types.TeamInfo{
 				Name:          resolvedName,
 				CreatedAt:     createdAt,
+				SortKey:       discoveredTeamSortKey(found, resolvedName),
 				LeadSessionID: found.LeadSessionID,
 				ProjectCwd:    found.ProjectCwd,
 				Members:       append([]types.AgentInfo(nil), found.Members...),
@@ -1087,6 +1135,22 @@ func resolveDiscoveredTeamName(found parser.ProjectTeamDiscovery, teams []types.
 
 	if bestScore > 0 && !ambiguous {
 		return bestName
+	}
+	return ""
+}
+
+func discoveredTeamSortKey(found parser.ProjectTeamDiscovery, resolvedName string) string {
+	if strings.TrimSpace(found.ProjectCwd) != "" {
+		return "discovered:cwd:" + strings.ToLower(strings.TrimSpace(found.ProjectCwd))
+	}
+	if strings.TrimSpace(found.LeadSessionID) != "" {
+		return "discovered:session:" + strings.ToLower(strings.TrimSpace(found.LeadSessionID))
+	}
+	if strings.TrimSpace(found.TeamNameHint) != "" {
+		return "discovered:hint:" + strings.ToLower(strings.TrimSpace(found.TeamNameHint))
+	}
+	if strings.TrimSpace(resolvedName) != "" {
+		return "discovered:name:" + strings.ToLower(strings.TrimSpace(resolvedName))
 	}
 	return ""
 }

@@ -1,0 +1,7 @@
+agent-team-monitor (__VERSION__) unstable; urgency=medium
+
+  * Add a native Linux desktop window that embeds the monitoring UI.
+  * Keep packaged icon assets, desktop entry, and Debian packaging aligned.
+  * Preserve fixed team ordering so active updates do not reshuffle the list.
+
+ -- Agent Team Monitor Maintainers <noreply@example.com>  __DATE__

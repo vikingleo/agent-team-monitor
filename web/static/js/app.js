@@ -1,3 +1,5 @@
+import { getDesktopPreferences, initDesktopUI, isDesktopMode, setDesktopPreferences } from './desktop-ui.js';
+
 // API Configuration
 const API_BASE_URL = window.location.origin;
 const API_ENDPOINTS = {
@@ -6,6 +8,8 @@ const API_ENDPOINTS = {
     processes: `${API_BASE_URL}/api/processes`,
     health: `${API_BASE_URL}/api/health`
 };
+const DESKTOP_BRIDGE = window.AgentMonitorDesktopBridge || null;
+const IS_DESKTOP_MODE = isDesktopMode();
 
 // State
 let isConnected = true;
@@ -18,16 +22,39 @@ const THEME_STORAGE_KEY = 'atm-dashboard-theme';
 const DEFAULT_THEME = 'light';
 const DASHBOARD_ACTIVE_WINDOW_MS = 20 * 60 * 1000;
 let activeAgentDetailKey = null;
-
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Agent Team Monitor initialized');
+    if (IS_DESKTOP_MODE) {
+        const prefs = getDesktopPreferences();
+        hideIdleAgents = prefs.hideIdleAgents !== false;
+        currentProviderFilter = prefs.providerFilter || 'all';
+    }
+    applyDesktopMode();
     initThemeSwitcher();
     initTabs();
     initViewFilters();
     initAgentDetailModal();
     startAutoRefresh();
     fetchData();
+    initDesktopUI({
+        onRefresh: () => {
+            fetchData();
+        },
+        onPreferencesChanged: (preferences) => {
+            hideIdleAgents = preferences.hideIdleAgents !== false;
+            currentProviderFilter = preferences.providerFilter || 'all';
+            const hideIdleToggle = document.getElementById('hide-idle-toggle');
+            if (hideIdleToggle) {
+                hideIdleToggle.checked = hideIdleAgents;
+            }
+            document.querySelectorAll('.filter-chip').forEach((chip) => {
+                const provider = chip.getAttribute('data-provider') || 'all';
+                chip.classList.toggle('active', provider === currentProviderFilter);
+            });
+            renderFilteredUI();
+        }
+    });
 });
 
 function initThemeSwitcher() {
@@ -39,6 +66,10 @@ function initThemeSwitcher() {
     const initialTheme = getStoredTheme();
     applyTheme(initialTheme);
 
+    if (IS_DESKTOP_MODE) {
+        return;
+    }
+
     buttons.forEach((button) => {
         button.addEventListener('click', () => {
             const nextTheme = button.getAttribute('data-theme-choice') || DEFAULT_THEME;
@@ -47,7 +78,16 @@ function initThemeSwitcher() {
     });
 }
 
+function applyDesktopMode() {
+    document.body.setAttribute('data-desktop-mode', IS_DESKTOP_MODE ? '1' : '0');
+    document.documentElement.setAttribute('data-desktop-mode', IS_DESKTOP_MODE ? '1' : '0');
+}
+
 function getStoredTheme() {
+    if (IS_DESKTOP_MODE) {
+        return getDesktopPreferences().theme || DEFAULT_THEME;
+    }
+
     try {
         const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
         if (storedTheme === 'light' || storedTheme === 'dark') {
@@ -64,10 +104,12 @@ function applyTheme(theme) {
     const nextTheme = theme === 'dark' ? 'dark' : DEFAULT_THEME;
     document.documentElement.setAttribute('data-theme', nextTheme);
 
-    try {
-        localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
-    } catch (error) {
-        console.warn('Unable to persist theme to localStorage:', error);
+    if (!IS_DESKTOP_MODE) {
+        try {
+            localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+        } catch (error) {
+            console.warn('Unable to persist theme to localStorage:', error);
+        }
     }
 
     document.querySelectorAll('[data-theme-choice]').forEach((button) => {
@@ -106,12 +148,21 @@ function switchTab(tabName) {
 
 // Auto-refresh
 function startAutoRefresh() {
+    if (IS_DESKTOP_MODE && DESKTOP_BRIDGE) {
+        updateInterval = DESKTOP_BRIDGE.startDesktopPolling(fetchData);
+        return;
+    }
+
     updateInterval = setInterval(fetchData, 1000);
 }
 
 function stopAutoRefresh() {
     if (updateInterval) {
-        clearInterval(updateInterval);
+        if (typeof updateInterval === 'function') {
+            updateInterval();
+        } else {
+            clearInterval(updateInterval);
+        }
         updateInterval = null;
     }
 }
@@ -119,16 +170,23 @@ function stopAutoRefresh() {
 // Fetch data from API
 async function fetchData() {
     try {
-        const response = await fetch(`${API_ENDPOINTS.state}?_ts=${Date.now()}`, {
-            cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache'
+        let data;
+
+        if (IS_DESKTOP_MODE && DESKTOP_BRIDGE) {
+            data = await DESKTOP_BRIDGE.fetchDesktopState();
+        } else {
+            const response = await fetch(`${API_ENDPOINTS.state}?_ts=${Date.now()}`, {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            data = await response.json();
         }
-        const data = await response.json();
+
         updateUI(data);
         updateConnectionStatus(true);
     } catch (error) {
@@ -151,15 +209,39 @@ function initViewFilters() {
             currentProviderFilter = nextFilter;
             chips.forEach(node => node.classList.toggle('active', node === chip));
             renderFilteredUI();
+            if (IS_DESKTOP_MODE) {
+                const desktopProviderFilterSelect = document.getElementById('desktop-provider-filter-select');
+                if (desktopProviderFilterSelect) {
+                    desktopProviderFilterSelect.value = nextFilter;
+                }
+                setDesktopPreferences({
+                    ...getDesktopPreferences(),
+                    providerFilter: nextFilter
+                }).catch((error) => {
+                    console.error('Failed to persist desktop provider filter:', error);
+                });
+            }
         });
     });
 
     const hideIdleToggle = document.getElementById('hide-idle-toggle');
     if (hideIdleToggle) {
-        hideIdleToggle.checked = true;
+        hideIdleToggle.checked = hideIdleAgents;
         hideIdleToggle.addEventListener('change', (event) => {
             hideIdleAgents = Boolean(event.target.checked);
             renderFilteredUI();
+            if (IS_DESKTOP_MODE) {
+                const desktopHideIdleToggle = document.getElementById('desktop-hide-idle-toggle');
+                if (desktopHideIdleToggle) {
+                    desktopHideIdleToggle.checked = hideIdleAgents;
+                }
+                setDesktopPreferences({
+                    ...getDesktopPreferences(),
+                    hideIdleAgents
+                }).catch((error) => {
+                    console.error('Failed to persist desktop idle filter:', error);
+                });
+            }
         });
     }
 }
@@ -643,13 +725,17 @@ async function deleteTeam(teamName) {
     }
 
     try {
-        const response = await fetch(`${API_ENDPOINTS.teams}/${encodeURIComponent(teamName)}`, {
-            method: 'DELETE',
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        if (IS_DESKTOP_MODE && DESKTOP_BRIDGE) {
+            await DESKTOP_BRIDGE.deleteDesktopTeam(teamName);
+        } else {
+            const response = await fetch(`${API_ENDPOINTS.teams}/${encodeURIComponent(teamName)}`, {
+                method: 'DELETE',
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
         }
-        fetchData();
+        await fetchData();
     } catch (error) {
         console.error('Error deleting team:', error);
         alert(`清理团队失败: ${error.message}`);

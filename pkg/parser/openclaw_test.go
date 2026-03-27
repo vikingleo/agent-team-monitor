@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -217,7 +218,8 @@ func TestDiscoverOpenClawSubagentRuns(t *testing.T) {
 		t.Fatalf("mkdir failed: %v", err)
 	}
 
-	runsJSON := `{
+	now := time.Now()
+	runsJSON := fmt.Sprintf(`{
   "version": 2,
   "runs": {
     "run-123": {
@@ -228,12 +230,12 @@ func TestDiscoverOpenClawSubagentRuns(t *testing.T) {
       "task": "修复 openclaw 子 agent 监控",
       "label": "coder-leaf",
       "workspaceDir": "/home/test/work/project",
-      "createdAt": 1774339200000,
-      "startedAt": 1774339260000,
+      "createdAt": %d,
+      "startedAt": %d,
       "spawnMode": "run"
     }
   }
-}`
+}`, now.Add(-2*time.Minute).UnixMilli(), now.Add(-1*time.Minute).UnixMilli())
 	if err := os.WriteFile(filepath.Join(subagentsDir, "runs.json"), []byte(runsJSON), 0644); err != nil {
 		t.Fatalf("write runs.json failed: %v", err)
 	}

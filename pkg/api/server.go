@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -50,6 +51,13 @@ func NewServer(collector *monitor.Collector, addr string, staticFS fs.FS) *Serve
 func (s *Server) Start() error {
 	log.Printf("Starting web server on %s", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
+}
+
+// StartListener starts the HTTP server on an existing listener.
+func (s *Server) StartListener(listener net.Listener) error {
+	s.httpServer.Addr = listener.Addr().String()
+	log.Printf("Starting web server on %s", s.httpServer.Addr)
+	return s.httpServer.Serve(listener)
 }
 
 // Stop stops the HTTP server

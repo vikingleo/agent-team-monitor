@@ -132,11 +132,11 @@ func TestBuildCodexTeams_SeparatesUnrelatedPrefixesWithoutSharedDirectory(t *tes
 		t.Fatalf("expected 2 separate codex teams, got %d", len(teams))
 	}
 
-	if teams[0].Name != "codex-beta" {
-		t.Fatalf("expected most active team first, got %s", teams[0].Name)
+	if teams[0].Name != "codex-alpha" {
+		t.Fatalf("expected stable alpha-first ordering, got %s", teams[0].Name)
 	}
-	if teams[1].Name != "codex-alpha" {
-		t.Fatalf("expected second team to be codex-alpha, got %s", teams[1].Name)
+	if teams[1].Name != "codex-beta" {
+		t.Fatalf("expected second team to be codex-beta, got %s", teams[1].Name)
 	}
 }
 

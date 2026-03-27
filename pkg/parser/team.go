@@ -77,6 +77,7 @@ func ParseTeamConfig(configPath string) (*types.TeamInfo, error) {
 	return &types.TeamInfo{
 		Name:          config.Name,
 		CreatedAt:     createdAt,
+		SortKey:       configPath,
 		LeadSessionID: config.LeadSessionID,
 		Members:       agents,
 		Tasks:         []types.TaskInfo{},

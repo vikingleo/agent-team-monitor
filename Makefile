@@ -1,4 +1,4 @@
-.PHONY: build run run-web clean install test build-all build-windows release
+.PHONY: build build-desktop install-desktop-entry package-deb run run-web clean install test build-all build-windows release
 
 APP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GO_LDFLAGS ?= -X main.appVersion=$(APP_VERSION)
@@ -6,6 +6,21 @@ GO_LDFLAGS ?= -X main.appVersion=$(APP_VERSION)
 # Build the application
 build:
 	go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor ./cmd/monitor
+
+# Build the Linux desktop app
+build-desktop:
+	go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor ./cmd/monitor
+	go build -ldflags "$(GO_LDFLAGS)" -o bin/agent-team-monitor-desktop ./cmd/desktop
+
+# Install desktop app entry and icon for the current user
+install-desktop-entry: build-desktop
+	chmod +x ./scripts/install-desktop-entry.sh
+	./scripts/install-desktop-entry.sh
+
+# Build a Debian package for Linux desktop installation
+package-deb: build-desktop
+	chmod +x ./scripts/build-deb.sh
+	./scripts/build-deb.sh
 
 # Run the application in TUI mode
 run:
@@ -69,6 +84,9 @@ release:
 help:
 	@echo "Available commands:"
 	@echo "  make build          - Build the application"
+	@echo "  make build-desktop  - Build the Linux desktop app"
+	@echo "  make install-desktop-entry - Install Linux desktop entry and icon"
+	@echo "  make package-deb    - Build a Debian package (.deb)"
 	@echo "  make run            - Run in TUI mode"
 	@echo "  make run-web        - Run in web mode (port 8080)"
 	@echo "  make run-web-port   - Run in web mode with custom port (PORT=3000)"
