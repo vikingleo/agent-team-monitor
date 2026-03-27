@@ -170,8 +170,14 @@ body {
     min-height: 100vh;
 }
 
+html[data-desktop-mode="1"],
 body[data-desktop-mode="1"] {
+    height: 100%;
     overflow: hidden;
+}
+
+body[data-desktop-mode="1"] {
+    overscroll-behavior-y: none;
 }
 
 /* ---- Layout ---- */
@@ -183,7 +189,7 @@ body[data-desktop-mode="1"] {
 }
 
 body[data-desktop-mode="1"] .container {
-    padding: 14px 16px 16px;
+    padding: 14px 16px 88px;
 }
 
 .app-shell {
@@ -191,7 +197,13 @@ body[data-desktop-mode="1"] .container {
 }
 
 body[data-desktop-mode="1"] .app-shell {
-    min-height: 0;
+    height: 100vh;
+    min-height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable both-edges;
 }
 
 .dashboard-main {

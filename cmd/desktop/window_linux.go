@@ -5,6 +5,90 @@ package main
 /*
 #cgo pkg-config: gtk+-3.0
 #include <gtk/gtk.h>
+
+extern gboolean atmWindowScroll(GtkWidget *widget, GdkEventScroll *event, gpointer data);
+extern gboolean atmWindowKeyPress(GtkWidget *widget, GdkEventKey *event, gpointer data);
+
+static GtkWidget* atm_window_content(GtkWidget *window) {
+	if (window == NULL || !GTK_IS_BIN(window)) {
+		return NULL;
+	}
+
+	return gtk_bin_get_child(GTK_BIN(window));
+}
+
+static gboolean atm_repair_window_focus(GtkWidget *window, GdkEvent *event, gpointer data) {
+	GtkWidget *child = atm_window_content(window);
+	if (child == NULL) {
+		return FALSE;
+	}
+
+	gtk_widget_set_can_focus(child, TRUE);
+	gtk_widget_grab_focus(child);
+	return FALSE;
+}
+
+static void atm_install_window_focus_repair(GtkWidget *window) {
+	if (window == NULL) {
+		return;
+	}
+
+	g_signal_connect(window, "focus-in-event", G_CALLBACK(atm_repair_window_focus), NULL);
+}
+
+static void atm_focus_window_content(GtkWidget *window) {
+	atm_repair_window_focus(window, NULL, NULL);
+}
+
+static void atm_install_window_scroll_fallback(GtkWidget *window) {
+	GtkWidget *child = atm_window_content(window);
+	if (window == NULL || child == NULL) {
+		return;
+	}
+
+	gtk_widget_add_events(child, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_KEY_PRESS_MASK);
+	gtk_widget_add_events(window, GDK_KEY_PRESS_MASK);
+	g_signal_connect(child, "scroll-event", G_CALLBACK(atmWindowScroll), NULL);
+	g_signal_connect(child, "key-press-event", G_CALLBACK(atmWindowKeyPress), NULL);
+	g_signal_connect(window, "key-press-event", G_CALLBACK(atmWindowKeyPress), NULL);
+}
+
+static double atm_scroll_event_delta_y(GdkEventScroll *event) {
+	double delta_x = 0;
+	double delta_y = 0;
+	if (event == NULL) {
+		return 0;
+	}
+
+	if (gdk_event_get_scroll_deltas((GdkEvent *)event, &delta_x, &delta_y)) {
+		return delta_y * 48.0;
+	}
+
+	switch (event->direction) {
+	case GDK_SCROLL_UP:
+		return -48.0;
+	case GDK_SCROLL_DOWN:
+		return 48.0;
+	default:
+		return 0;
+	}
+}
+
+static guint atm_key_event_keyval(GdkEventKey *event) {
+	if (event == NULL) {
+		return 0;
+	}
+
+	return event->keyval;
+}
+
+static guint atm_key_event_state(GdkEventKey *event) {
+	if (event == NULL) {
+		return 0;
+	}
+
+	return event->state;
+}
 */
 import "C"
 
@@ -17,6 +101,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -37,9 +122,15 @@ type desktopMainWindow struct {
 	session     *agentapp.WebSession
 	webview     webview.WebView
 
-	mu   sync.Mutex
-	quit sync.Once
+	mu             sync.Mutex
+	quit           sync.Once
+	dispatchClosed atomic.Bool
 }
+
+var (
+	desktopWindowMu     sync.Mutex
+	activeDesktopWindow *desktopMainWindow
+)
 
 func newDesktopMainWindow(session *agentapp.WebSession, preferences *desktopPreferencesController, provider, version string) (*desktopMainWindow, error) {
 	if session == nil {
@@ -50,7 +141,7 @@ func newDesktopMainWindow(session *agentapp.WebSession, preferences *desktopPref
 		preferences = newDesktopPreferencesController(newInMemoryDesktopPreferencesStore(), nil, nil)
 	}
 
-	wv := webview.New(false)
+	wv := webview.New(desktopWebViewDebugEnabled())
 	if !validDesktopWebView(wv) {
 		return nil, fmt.Errorf("create webview: native window unavailable (%s)", desktopDisplayFailureContext())
 	}
@@ -67,6 +158,9 @@ func newDesktopMainWindow(session *agentapp.WebSession, preferences *desktopPref
 	w.SetTitle(windowTitle)
 	w.webview.SetSize(1480, 980, webview.HintNone)
 	w.applyWindowIcon()
+	installDesktopWindowFocusRepair(w.Window())
+	installDesktopWindowScrollFallback(w.Window())
+	registerActiveDesktopWindow(w)
 	return w, nil
 }
 
@@ -241,11 +335,13 @@ func (w *desktopMainWindow) Run() {
 
 	w.loadInitialView()
 	w.scheduleWindowIconRefresh()
+	w.scheduleInitialFocusRepair()
 	w.webview.Run()
+	w.dispatchClosed.Store(true)
 }
 
 func (w *desktopMainWindow) Dispatch(fn func()) {
-	if w == nil || w.webview == nil || fn == nil {
+	if w == nil || w.webview == nil || fn == nil || w.dispatchClosed.Load() || !validDesktopWebView(w.webview) {
 		return
 	}
 	w.webview.Dispatch(fn)
@@ -270,6 +366,7 @@ func (w *desktopMainWindow) Present() {
 		}
 		C.gtk_widget_show_all(window)
 		C.gtk_window_present((*C.GtkWindow)(unsafe.Pointer(window)))
+		focusDesktopWindowContent(unsafe.Pointer(window))
 	})
 }
 
@@ -279,6 +376,7 @@ func (w *desktopMainWindow) Terminate() {
 	}
 
 	w.quit.Do(func() {
+		w.dispatchClosed.Store(true)
 		if w.webview != nil {
 			w.webview.Terminate()
 		}
@@ -348,6 +446,8 @@ func (w *desktopMainWindow) Destroy() {
 	if w == nil || w.webview == nil {
 		return
 	}
+	w.dispatchClosed.Store(true)
+	unregisterActiveDesktopWindow(w)
 	w.webview.Destroy()
 }
 
@@ -426,6 +526,166 @@ func gtkWindowFromHost(host desktopUIHost) *C.GtkWidget {
 		return nil
 	}
 	return (*C.GtkWidget)(window)
+}
+
+func installDesktopWindowFocusRepair(window unsafe.Pointer) {
+	if window == nil {
+		return
+	}
+
+	C.atm_install_window_focus_repair((*C.GtkWidget)(window))
+}
+
+func focusDesktopWindowContent(window unsafe.Pointer) {
+	if window == nil {
+		return
+	}
+
+	C.atm_focus_window_content((*C.GtkWidget)(window))
+}
+
+func (w *desktopMainWindow) scheduleInitialFocusRepair() {
+	if w == nil {
+		return
+	}
+
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		w.Dispatch(func() {
+			focusDesktopWindowContent(w.Window())
+		})
+	}()
+}
+
+func registerActiveDesktopWindow(window *desktopMainWindow) {
+	desktopWindowMu.Lock()
+	activeDesktopWindow = window
+	desktopWindowMu.Unlock()
+}
+
+func unregisterActiveDesktopWindow(window *desktopMainWindow) {
+	desktopWindowMu.Lock()
+	if activeDesktopWindow == window {
+		activeDesktopWindow = nil
+	}
+	desktopWindowMu.Unlock()
+}
+
+func currentActiveDesktopWindow() *desktopMainWindow {
+	desktopWindowMu.Lock()
+	defer desktopWindowMu.Unlock()
+	return activeDesktopWindow
+}
+
+func installDesktopWindowScrollFallback(window unsafe.Pointer) {
+	if window == nil {
+		return
+	}
+
+	C.atm_install_window_scroll_fallback((*C.GtkWidget)(window))
+}
+
+func (w *desktopMainWindow) nativeScrollBy(delta int) bool {
+	if w == nil || w.webview == nil || w.dispatchClosed.Load() {
+		return false
+	}
+
+	w.webview.Eval(fmt.Sprintf(`window.__ATM_NATIVE_SCROLL_FALLBACK__ && window.__ATM_NATIVE_SCROLL_FALLBACK__('by', %d);`, delta))
+	return true
+}
+
+func (w *desktopMainWindow) nativeScrollToEdge(bottom bool) bool {
+	if w == nil || w.webview == nil || w.dispatchClosed.Load() {
+		return false
+	}
+
+	command := "top"
+	if bottom {
+		command = "bottom"
+	}
+	w.webview.Eval(fmt.Sprintf(`window.__ATM_NATIVE_SCROLL_FALLBACK__ && window.__ATM_NATIVE_SCROLL_FALLBACK__('%s', 0);`, command))
+	return true
+}
+
+//export atmWindowScroll
+func atmWindowScroll(widget *C.GtkWidget, event *C.GdkEventScroll, data C.gpointer) C.gboolean {
+	window := currentActiveDesktopWindow()
+	if window == nil {
+		return C.FALSE
+	}
+
+	delta := int(C.atm_scroll_event_delta_y(event))
+	if delta == 0 {
+		return C.FALSE
+	}
+
+	if window.nativeScrollBy(delta) {
+		return C.TRUE
+	}
+
+	return C.FALSE
+}
+
+//export atmWindowKeyPress
+func atmWindowKeyPress(widget *C.GtkWidget, event *C.GdkEventKey, data C.gpointer) C.gboolean {
+	window := currentActiveDesktopWindow()
+	if window == nil {
+		return C.FALSE
+	}
+
+	state := uint(C.atm_key_event_state(event))
+	blockingModifiers := uint(C.GDK_CONTROL_MASK | C.GDK_MOD1_MASK | C.GDK_SUPER_MASK | C.GDK_META_MASK)
+	if state&blockingModifiers != 0 {
+		return C.FALSE
+	}
+
+	key := uint(C.atm_key_event_keyval(event))
+	pageDelta := 840
+
+	switch key {
+	case uint(C.GDK_KEY_Down), uint(C.GDK_KEY_KP_Down):
+		if window.nativeScrollBy(56) {
+			return C.TRUE
+		}
+	case uint(C.GDK_KEY_Up), uint(C.GDK_KEY_KP_Up):
+		if window.nativeScrollBy(-56) {
+			return C.TRUE
+		}
+	case uint(C.GDK_KEY_Page_Down), uint(C.GDK_KEY_KP_Page_Down), uint(C.GDK_KEY_space), uint(C.GDK_KEY_KP_Space):
+		if state&uint(C.GDK_SHIFT_MASK) != 0 {
+			if window.nativeScrollBy(-pageDelta) {
+				return C.TRUE
+			}
+			return C.FALSE
+		}
+		if window.nativeScrollBy(pageDelta) {
+			return C.TRUE
+		}
+	case uint(C.GDK_KEY_Page_Up), uint(C.GDK_KEY_KP_Page_Up):
+		if window.nativeScrollBy(-pageDelta) {
+			return C.TRUE
+		}
+	case uint(C.GDK_KEY_Home), uint(C.GDK_KEY_KP_Home):
+		if window.nativeScrollToEdge(false) {
+			return C.TRUE
+		}
+	case uint(C.GDK_KEY_End), uint(C.GDK_KEY_KP_End):
+		if window.nativeScrollToEdge(true) {
+			return C.TRUE
+		}
+	}
+
+	return C.FALSE
+}
+
+func desktopWebViewDebugEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("ATM_DESKTOP_WEBVIEW_DEBUG")))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func desktopWindowIconPath() string {

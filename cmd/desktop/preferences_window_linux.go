@@ -251,19 +251,34 @@ func (n *desktopNativeWindows) destroy() {
 	nativeWindowsMu.Unlock()
 
 	n.host.Dispatch(func() {
-		n.mu.Lock()
-		defer n.mu.Unlock()
-		if n.preferencesUI != nil {
-			prefs := n.preferencesUI
-			n.preferencesUI = nil
-			C.atm_preferences_window_destroy(prefs)
-		}
-		if n.aboutUI != nil {
-			about := n.aboutUI
-			n.aboutUI = nil
-			C.gtk_widget_destroy(about)
-		}
+		n.destroyDirect()
 	})
+}
+
+func (n *desktopNativeWindows) destroyDirect() {
+	if n == nil {
+		return
+	}
+
+	nativeWindowsMu.Lock()
+	if activeNativeWindows == n {
+		activeNativeWindows = nil
+	}
+	nativeWindowsMu.Unlock()
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.preferencesUI != nil {
+		prefs := n.preferencesUI
+		n.preferencesUI = nil
+		C.atm_preferences_window_destroy(prefs)
+	}
+	if n.aboutUI != nil {
+		about := n.aboutUI
+		n.aboutUI = nil
+		C.gtk_widget_destroy(about)
+	}
 }
 
 func (n *desktopNativeWindows) showPreferences() {

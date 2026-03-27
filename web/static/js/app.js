@@ -22,6 +22,8 @@ const THEME_STORAGE_KEY = 'atm-dashboard-theme';
 const DEFAULT_THEME = 'light';
 const DASHBOARD_ACTIVE_WINDOW_MS = 20 * 60 * 1000;
 let activeAgentDetailKey = null;
+let dashboardScrollRoot = null;
+let scrollRAF = null;
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Agent Team Monitor initialized');
@@ -31,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentProviderFilter = prefs.providerFilter || 'all';
     }
     applyDesktopMode();
+    initDashboardScrollHandling();
     initThemeSwitcher();
     initTabs();
     initViewFilters();
@@ -81,6 +84,152 @@ function initThemeSwitcher() {
 function applyDesktopMode() {
     document.body.setAttribute('data-desktop-mode', IS_DESKTOP_MODE ? '1' : '0');
     document.documentElement.setAttribute('data-desktop-mode', IS_DESKTOP_MODE ? '1' : '0');
+}
+
+function getDashboardScrollRoot() {
+    if (!IS_DESKTOP_MODE) {
+        return null;
+    }
+
+    if (dashboardScrollRoot instanceof HTMLElement && dashboardScrollRoot.isConnected) {
+        return dashboardScrollRoot;
+    }
+
+    dashboardScrollRoot = document.getElementById('app-scroll-root');
+    return dashboardScrollRoot instanceof HTMLElement ? dashboardScrollRoot : null;
+}
+
+function findScrollableAncestor(start, fallback) {
+    let node = start instanceof Element ? start : null;
+
+    while (node && node !== document.body && node !== document.documentElement) {
+        if (node === fallback) {
+            return fallback;
+        }
+
+        if (node instanceof HTMLElement) {
+            const style = window.getComputedStyle(node);
+            const overflowY = style.overflowY || '';
+            const canScroll = /(auto|scroll|overlay)/.test(overflowY) && node.scrollHeight > node.clientHeight + 1;
+            if (canScroll) {
+                return node;
+            }
+        }
+
+        node = node.parentElement;
+    }
+
+    return fallback || null;
+}
+
+function scheduleTeamNavActiveUpdate() {
+    if (scrollRAF) {
+        return;
+    }
+
+    scrollRAF = requestAnimationFrame(() => {
+        updateTeamNavActive();
+        scrollRAF = null;
+    });
+}
+
+function initDashboardScrollHandling() {
+    if (!IS_DESKTOP_MODE) {
+        window.addEventListener('scroll', scheduleTeamNavActiveUpdate, { passive: true });
+        return;
+    }
+
+    const scrollRoot = getDashboardScrollRoot();
+    if (!(scrollRoot instanceof HTMLElement)) {
+        window.addEventListener('scroll', scheduleTeamNavActiveUpdate, { passive: true });
+        return;
+    }
+
+    scrollRoot.setAttribute('tabindex', '-1');
+
+    const focusScrollRoot = () => {
+        scrollRoot.focus({ preventScroll: true });
+    };
+
+    scrollRoot.addEventListener('pointerdown', () => {
+        focusScrollRoot();
+    }, { passive: true });
+
+    scrollRoot.addEventListener('scroll', scheduleTeamNavActiveUpdate, { passive: true });
+    scrollRoot.addEventListener('wheel', (event) => {
+        if (event.defaultPrevented || event.ctrlKey || Math.abs(event.deltaY) < 0.01) {
+            return;
+        }
+
+        const activeScroller = findScrollableAncestor(event.target, scrollRoot);
+        if (!(activeScroller instanceof HTMLElement) || activeScroller !== scrollRoot) {
+            return;
+        }
+
+        const before = scrollRoot.scrollTop;
+        scrollRoot.scrollTop += event.deltaY;
+        if (scrollRoot.scrollTop !== before) {
+            event.preventDefault();
+        }
+    }, { passive: false });
+
+    document.addEventListener('keydown', (event) => {
+        const activeElement = document.activeElement;
+        const isTyping = activeElement instanceof HTMLElement && (
+            activeElement.tagName === 'INPUT' ||
+            activeElement.tagName === 'TEXTAREA' ||
+            activeElement.tagName === 'SELECT' ||
+            activeElement.isContentEditable
+        );
+        if (isTyping || event.defaultPrevented) {
+            return;
+        }
+
+        let delta = 0;
+        switch (event.key) {
+            case 'ArrowDown':
+                delta = 56;
+                break;
+            case 'ArrowUp':
+                delta = -56;
+                break;
+            case 'PageDown':
+                delta = Math.max(320, Math.floor(scrollRoot.clientHeight * 0.9));
+                break;
+            case 'PageUp':
+                delta = -Math.max(320, Math.floor(scrollRoot.clientHeight * 0.9));
+                break;
+            case ' ':
+                delta = event.shiftKey
+                    ? -Math.max(320, Math.floor(scrollRoot.clientHeight * 0.9))
+                    : Math.max(320, Math.floor(scrollRoot.clientHeight * 0.9));
+                break;
+            case 'Home':
+                scrollRoot.scrollTo({ top: 0, behavior: 'smooth' });
+                focusScrollRoot();
+                event.preventDefault();
+                return;
+            case 'End':
+                scrollRoot.scrollTo({ top: scrollRoot.scrollHeight, behavior: 'smooth' });
+                focusScrollRoot();
+                event.preventDefault();
+                return;
+            default:
+                return;
+        }
+
+        const before = scrollRoot.scrollTop;
+        scrollRoot.scrollBy({ top: delta, behavior: 'smooth' });
+        focusScrollRoot();
+        if (delta !== 0 || scrollRoot.scrollTop !== before) {
+            event.preventDefault();
+        }
+    });
+
+    window.setTimeout(() => {
+        focusScrollRoot();
+        scheduleTeamNavActiveUpdate();
+    }, 0);
 }
 
 function getStoredTheme() {
@@ -653,16 +802,6 @@ function updateTeamNavActive() {
         item.classList.toggle('active', item.getAttribute('data-team-id') === activeId);
     });
 }
-
-// Listen for scroll to update active team nav
-let scrollRAF = null;
-window.addEventListener('scroll', () => {
-    if (scrollRAF) return;
-    scrollRAF = requestAnimationFrame(() => {
-        updateTeamNavActive();
-        scrollRAF = null;
-    });
-}, { passive: true });
 
 // Render a single team
 function renderTeam(team) {

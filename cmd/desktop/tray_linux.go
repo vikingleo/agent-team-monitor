@@ -275,8 +275,22 @@ func (t *desktopTray) destroy() {
 	trayMu.Unlock()
 
 	t.host.Dispatch(func() {
-		C.atm_destroy_tray_icon()
+		t.destroyDirect()
 	})
+}
+
+func (t *desktopTray) destroyDirect() {
+	if t == nil {
+		return
+	}
+
+	trayMu.Lock()
+	if activeTray == t {
+		activeTray = nil
+	}
+	trayMu.Unlock()
+
+	C.atm_destroy_tray_icon()
 }
 
 func (t *desktopTray) showWindow() {
@@ -285,7 +299,9 @@ func (t *desktopTray) showWindow() {
 	}
 
 	t.host.Dispatch(func() {
-		C.atm_window_show((*C.GtkWidget)(t.host.Window()))
+		window := t.host.Window()
+		C.atm_window_show((*C.GtkWidget)(window))
+		focusDesktopWindowContent(window)
 	})
 }
 

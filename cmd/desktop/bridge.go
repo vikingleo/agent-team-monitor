@@ -20,6 +20,37 @@ func desktopBridgeInitJS(prefs desktopPreferences) string {
 window.__ATM_DESKTOP__ = true;
 window.__ATM_DESKTOP_BRIDGE_VERSION__ = 1;
 window.__ATM_DESKTOP_INITIAL_PREFERENCES__ = %s;
+window.__ATM_NATIVE_SCROLL_FALLBACK__ = function(command, amount) {
+  if ((window.location.pathname || '').startsWith('/game')) {
+    return false;
+  }
+
+  var root = document.getElementById('app-scroll-root') || document.scrollingElement || document.documentElement;
+  if (!root) {
+    return false;
+  }
+
+  var maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
+  var before = root.scrollTop || 0;
+
+  if (command === 'top') {
+    root.scrollTop = 0;
+  } else if (command === 'bottom') {
+    root.scrollTop = maxScrollTop;
+  } else {
+    var delta = Number(amount || 0);
+    var next = before + delta;
+    if (next < 0) {
+      next = 0;
+    }
+    if (next > maxScrollTop) {
+      next = maxScrollTop;
+    }
+    root.scrollTop = next;
+  }
+
+  return root.scrollTop !== before;
+};
 `, string(payload))
 }
 
@@ -93,7 +124,6 @@ func (b *desktopBridge) bind(w desktopBridgeView) error {
 	if err := w.Bind("atmDesktopOpenAbout", b.openAboutWindow); err != nil {
 		return fmt.Errorf("bind atmDesktopOpenAbout: %w", err)
 	}
-
 	return nil
 }
 

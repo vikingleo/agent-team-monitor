@@ -88,7 +88,6 @@ func main() {
 		if err := tray.install(); err != nil {
 			log.Printf("install desktop tray: %v", err)
 		}
-		defer tray.destroy()
 	}
 	if err := preferencesController.Reconcile(); err != nil {
 		log.Printf("reconcile desktop preferences: %v", err)
@@ -102,7 +101,6 @@ func main() {
 	mainWindow.native = nativeWindows
 	if nativeWindows != nil {
 		nativeWindows.install()
-		defer nativeWindows.destroy()
 	}
 
 	bridge := newDesktopBridge(session.Collector, *provider, preferencesController, tray, nativeWindows)
@@ -131,5 +129,11 @@ func main() {
 	}()
 
 	mainWindow.Run()
+	if nativeWindows != nil {
+		nativeWindows.destroyDirect()
+	}
+	if tray != nil {
+		tray.destroyDirect()
+	}
 	mainWindow.Destroy()
 }
