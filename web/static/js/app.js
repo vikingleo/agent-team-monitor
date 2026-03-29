@@ -1118,12 +1118,48 @@ function renderAgentCard(team, agent, tasks) {
     `;
 }
 
+function normalizeLookupToken(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function buildAgentIdentityKey(agent) {
+    if (!agent) {
+        return 'unknown';
+    }
+
+    const agentID = normalizeLookupToken(agent.agent_id);
+    if (agentID) {
+        return `id:${agentID}`;
+    }
+
+    const parts = [];
+    const cwd = normalizeLookupToken(agent.cwd);
+    const joinedAt = normalizeLookupToken(agent.joined_at);
+    const name = normalizeLookupToken(agent.name);
+    const agentType = normalizeLookupToken(agent.agent_type);
+
+    if (cwd) {
+        parts.push(`cwd:${cwd}`);
+    }
+    if (joinedAt) {
+        parts.push(`joined:${joinedAt}`);
+    }
+    if (name) {
+        parts.push(`name:${name}`);
+    }
+    if (agentType) {
+        parts.push(`type:${agentType}`);
+    }
+
+    return parts.length > 0 ? parts.join('::') : 'unknown';
+}
+
 function buildAgentCardKey(team, agent) {
-    return `${team.name}::agent-card::${agent.name}`;
+    return `${team.name}::agent::${buildAgentIdentityKey(agent)}`;
 }
 
 function buildAgentDetailKey(team, agent) {
-    return `${team.name}::agent::${agent.name}`;
+    return `${team.name}::agent::${buildAgentIdentityKey(agent)}`;
 }
 
 function buildBroadcastDetailKey(team) {
@@ -1629,11 +1665,7 @@ function resolveActiveAgentDetail(activeKey, lookup) {
     }
 
     for (const [key, value] of lookup.entries()) {
-        if (value.broadcast && activeKey === key) {
-            return value;
-        }
-
-        if (!value.broadcast && (activeKey === key || activeKey === buildAgentCardKey(value.team, value.agent))) {
+        if (activeKey === key) {
             return value;
         }
     }
