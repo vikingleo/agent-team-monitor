@@ -7,6 +7,8 @@ set -euo pipefail
 # 用法:
 #   ./scripts/release.sh              # 使用最新 git tag 作为版本
 #   ./scripts/release.sh v1.3.0       # 指定版本号（会自动创建 tag）
+#   ./scripts/release.sh v1.5.0 --retag-current
+#                                  # 用当前 HEAD 覆盖已有版本 tag 并重发 release
 #
 # 前置条件:
 #   - 已安装 go、gh (GitHub CLI) 并已登录
@@ -21,6 +23,11 @@ GIT_REMOTE="${GIT_REMOTE:-origin}"
 GH_REPO="${GH_REPO:-}"
 DEFAULT_GH_REPO="vikingleo/agent-team-monitor"
 REMOTE_URL=""
+VERSION=""
+BUILD_REF=""
+FORCE_RETAG_CURRENT=0
+SKIP_CONFIRM=0
+TAG_PUSH_FORCE=0
 
 PLATFORMS=(
   "darwin/amd64"
@@ -30,6 +37,57 @@ PLATFORMS=(
   "windows/amd64"
   "windows/arm64"
 )
+
+usage() {
+  cat <<'EOF'
+用法:
+  ./scripts/release.sh [version] [options]
+
+参数:
+  version             发布版本号，例如 v1.5.0；省略时使用最新 tag
+
+选项:
+  --retag-current     将已有版本 tag 强制移动到当前 HEAD，再覆盖发布 release
+  -y, --yes           跳过交互确认
+  -h, --help          显示帮助
+
+示例:
+  ./scripts/release.sh
+  ./scripts/release.sh v1.6.0
+  ./scripts/release.sh v1.5.0 --retag-current
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --retag-current)
+        FORCE_RETAG_CURRENT=1
+        ;;
+      -y|--yes)
+        SKIP_CONFIRM=1
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -*)
+        echo "错误: 未知参数 $1"
+        echo ""
+        usage
+        exit 1
+        ;;
+      *)
+        if [[ -n "${VERSION}" ]]; then
+          echo "错误: 只能指定一个版本号，收到重复参数: ${VERSION} 和 $1"
+          exit 1
+        fi
+        VERSION="$1"
+        ;;
+    esac
+    shift
+  done
+}
 
 parse_github_repo() {
   local remote_url="$1"
@@ -76,6 +134,26 @@ resolve_github_repo() {
   exit 1
 }
 
+ensure_gh_ready() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "错误: 未找到 gh，请先安装 GitHub CLI"
+    exit 1
+  fi
+
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "错误: gh 尚未登录，请先执行 gh auth login"
+    exit 1
+  fi
+}
+
+ensure_clean_worktree() {
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "错误: 当前工作区有未提交变更，--retag-current 只能发布当前 HEAD 提交"
+    echo "请先提交或清理工作区后重试"
+    exit 1
+  fi
+}
+
 ensure_release_source_version() {
   local version="$1"
   local source_file="${2}/cmd/monitor/main.go"
@@ -93,7 +171,7 @@ ensure_release_source_version() {
 
 setup_release_worktree() {
   RELEASE_WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/${APP_NAME}-release-XXXXXX")"
-  git worktree add --detach "${RELEASE_WORKTREE}" "${VERSION}" >/dev/null
+  git worktree add --detach "${RELEASE_WORKTREE}" "${BUILD_REF}" >/dev/null
 }
 
 cleanup() {
@@ -102,14 +180,72 @@ cleanup() {
   fi
 }
 
+prepare_tag() {
+  local head_commit
+  local tag_commit=""
+
+  head_commit="$(git rev-parse HEAD)"
+
+  if git rev-parse "${VERSION}" >/dev/null 2>&1; then
+    tag_commit="$(git rev-parse "${VERSION}^{}")"
+  fi
+
+  if [[ "${FORCE_RETAG_CURRENT}" -eq 1 ]]; then
+    ensure_clean_worktree
+
+    if [[ -n "${tag_commit}" && "${tag_commit}" == "${head_commit}" ]]; then
+      echo ">> ${VERSION} 已指向当前 HEAD，无需重写 tag"
+    else
+      echo ">> 将 ${VERSION} 重新指向当前 HEAD (${head_commit})..."
+      git tag -fa "${VERSION}" -m "Release ${VERSION}" "${head_commit}"
+      TAG_PUSH_FORCE=1
+    fi
+  elif [[ -z "${tag_commit}" ]]; then
+    echo ">> 创建 tag: ${VERSION}"
+    git tag -a "${VERSION}" -m "Release ${VERSION}" "${head_commit}"
+  fi
+
+  BUILD_REF="${VERSION}"
+}
+
+generate_release_notes() {
+  local repo_dir="$1"
+  local history_start
+  local commits
+
+  history_start="$(git -C "${repo_dir}" describe --tags --abbrev=0 HEAD^ 2>/dev/null || git -C "${repo_dir}" rev-list --max-parents=0 HEAD | tail -n 1)"
+  commits="$(git -C "${repo_dir}" log "${history_start}"..HEAD --oneline 2>/dev/null || true)"
+  if [[ -z "${commits}" ]]; then
+    commits="Initial release"
+  fi
+
+  cat <<EOF
+## ${VERSION}
+
+### Downloads
+
+| Platform | Architecture | File |
+|----------|-------------|------|
+| macOS | Intel (amd64) | \`${APP_NAME}-darwin-amd64\` |
+| macOS | Apple Silicon (arm64) | \`${APP_NAME}-darwin-arm64\` |
+| Linux | amd64 | \`${APP_NAME}-linux-amd64\` |
+| Linux | arm64 | \`${APP_NAME}-linux-arm64\` |
+| Windows | amd64 | \`${APP_NAME}-windows-amd64.exe\` |
+| Windows | arm64 | \`${APP_NAME}-windows-arm64.exe\` |
+
+### Commits since last release
+${commits}
+EOF
+}
+
+parse_args "$@"
 resolve_git_remote
 resolve_github_repo
+ensure_gh_ready
 trap cleanup EXIT
 
 # ---- 版本号 ----
-if [[ $# -ge 1 ]]; then
-  VERSION="$1"
-else
+if [[ -z "${VERSION}" ]]; then
   # 从 git tag 获取最新版本
   VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
   if [[ -z "$VERSION" ]]; then
@@ -121,10 +257,15 @@ fi
 echo "=========================================="
 echo "  发布版本: ${VERSION}"
 echo "  远程仓库: ${GIT_REMOTE} (${GH_REPO})"
+if [[ "${FORCE_RETAG_CURRENT}" -eq 1 ]]; then
+  echo "  发布模式: 覆盖已有 tag 到当前 HEAD"
+fi
 echo "=========================================="
 
 # ---- 确认 ----
-if [[ -t 0 ]]; then
+if [[ "${SKIP_CONFIRM}" -eq 1 ]]; then
+  echo ">> 已指定 --yes，跳过发布确认"
+elif [[ -t 0 ]]; then
   read -rp "确认发布? (y/N) " confirm
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "已取消"
@@ -134,15 +275,17 @@ else
   echo ">> 非交互环境，跳过发布确认"
 fi
 
-# ---- 创建 tag（如果不存在）----
-if ! git rev-parse "$VERSION" >/dev/null 2>&1; then
-  echo ">> 创建 tag: ${VERSION}"
-  git tag -a "$VERSION" -m "Release ${VERSION}"
-fi
+# ---- 准备 tag / 构建来源 ----
+prepare_tag
 
 # ---- 推送 tag ----
-echo ">> 推送 tag 到 ${GIT_REMOTE}..."
-git push "$GIT_REMOTE" "$VERSION"
+if [[ "${TAG_PUSH_FORCE}" -eq 1 ]]; then
+  echo ">> 强制推送 tag 到 ${GIT_REMOTE}..."
+  git push --force "$GIT_REMOTE" "refs/tags/${VERSION}"
+else
+  echo ">> 推送 tag 到 ${GIT_REMOTE}..."
+  git push "$GIT_REMOTE" "$VERSION"
+fi
 
 SEMVER="${VERSION#v}"
 
@@ -154,6 +297,7 @@ mkdir -p "${BUILD_DIR}"
 echo ">> 准备隔离构建目录..."
 setup_release_worktree
 ensure_release_source_version "${SEMVER}" "${RELEASE_WORKTREE}"
+echo ">> 构建来源: ${BUILD_REF} -> $(git -C "${RELEASE_WORKTREE}" rev-parse --short HEAD)"
 
 echo ">> 开始多平台构建..."
 ARTIFACTS=()
@@ -176,22 +320,7 @@ echo ">> 构建完成:"
 ls -lh "${BUILD_DIR}/"
 
 # ---- 生成 Release Notes ----
-NOTES="## ${VERSION}
-
-### Downloads
-
-| Platform | Architecture | File |
-|----------|-------------|------|
-| macOS | Intel (amd64) | \`${APP_NAME}-darwin-amd64\` |
-| macOS | Apple Silicon (arm64) | \`${APP_NAME}-darwin-arm64\` |
-| Linux | amd64 | \`${APP_NAME}-linux-amd64\` |
-| Linux | arm64 | \`${APP_NAME}-linux-arm64\` |
-| Windows | amd64 | \`${APP_NAME}-windows-amd64.exe\` |
-| Windows | arm64 | \`${APP_NAME}-windows-arm64.exe\` |
-
-### Commits since last release
-$(git log "$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD --oneline 2>/dev/null || echo "Initial release")
-"
+NOTES="$(generate_release_notes "${RELEASE_WORKTREE}")"
 
 # ---- 创建 / 更新 GitHub Release ----
 if gh release view "$VERSION" --repo "$GH_REPO" >/dev/null 2>&1; then
