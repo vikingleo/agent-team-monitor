@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -31,10 +30,6 @@ func main() {
 	if *version {
 		fmt.Println(agentapp.FormatVersionLabel(windowTitle, appVersion))
 		return
-	}
-
-	if runtime.GOOS != "linux" {
-		log.Fatalf("desktop window is currently implemented for Linux")
 	}
 
 	instance, alreadyRunning, err := acquireDesktopSingleInstance()

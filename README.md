@@ -346,6 +346,25 @@ The default address is `http://localhost:8080`. When using a random port, the pr
 
 The browser tab uses the packaged app favicon from `web/static/assets/favicon.png`.
 
+Packaged cross-platform icon assets live under `assets/icons/`:
+
+- Linux desktop packaging uses `agent-team-monitor-{32,64,128,256}.png` and `agent-team-monitor.png` (512x512).
+- Windows builds use `agent-team-monitor.ico` plus the checked-in `cmd/monitor/rsrc_windows_*.syso` and `cmd/desktop/rsrc_windows_*.syso` resources for Explorer, shortcuts, and desktop executable icons.
+- macOS packaging assets use `agent-team-monitor.icns` and `agent-team-monitor.iconset/`; the packaged Dock icon comes from the generated `.app` bundle.
+
+After replacing the source iconset, regenerate everything with:
+
+```bash
+make generate-icons ICON_SOURCE=/path/to/AppIcon.iconset
+make generate-windows-resource
+```
+
+Desktop packaging by platform:
+
+- Linux: `make build-desktop`, `make install-desktop-entry`, `make package-deb`, `make package-appimage`
+- macOS: run `make package-macos-app` on a macOS host to produce `dist/Agent Team Monitor.app`
+- Windows: run `make build-desktop-windows` on a Windows-capable cgo toolchain to produce `bin/agent-team-monitor-desktop-windows-<arch>.exe`
+
 The Linux desktop app now runs as a desktop shell window that embeds the full Web dashboard and office scene instead of launching your browser.
 
 ## API Endpoints

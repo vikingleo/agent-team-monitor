@@ -1,4 +1,4 @@
-.PHONY: build build-desktop install-desktop-entry package-deb package-appimage run run-web clean install test build-all build-windows release
+.PHONY: build build-desktop install-desktop-entry package-deb package-appimage run run-web clean install test build-all build-windows release generate-icons generate-windows-resource package-macos-app build-desktop-windows
 
 APP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GO_LDFLAGS ?= -X main.appVersion=$(APP_VERSION)
@@ -16,6 +16,26 @@ build-desktop:
 install-desktop-entry: build-desktop
 	chmod +x ./scripts/install-desktop-entry.sh
 	./scripts/install-desktop-entry.sh
+
+# Regenerate packaged icon assets from a macOS AppIcon.iconset directory
+generate-icons:
+	@test -n "$(ICON_SOURCE)" || (echo "usage: make generate-icons ICON_SOURCE=/path/to/AppIcon.iconset" && exit 1)
+	python3 ./scripts/generate-icons.py "$(ICON_SOURCE)"
+
+# Regenerate Windows .syso resources after updating assets/icons/agent-team-monitor.ico
+generate-windows-resource:
+	chmod +x ./scripts/generate-windows-resource.sh
+	./scripts/generate-windows-resource.sh
+
+# Package a macOS .app bundle on a macOS host
+package-macos-app:
+	chmod +x ./scripts/package-macos-app.sh
+	./scripts/package-macos-app.sh "$(APP_VERSION)"
+
+# Build the Windows desktop executable on a Windows-capable cgo toolchain
+build-desktop-windows:
+	chmod +x ./scripts/build-desktop-windows.sh
+	./scripts/build-desktop-windows.sh "$(APP_VERSION)"
 
 # Build a Debian package for Linux desktop installation
 package-deb: build-desktop
@@ -92,6 +112,10 @@ help:
 	@echo "  make build          - Build the application"
 	@echo "  make build-desktop  - Build the Linux desktop app"
 	@echo "  make install-desktop-entry - Install Linux desktop entry and icon"
+	@echo "  make generate-icons ICON_SOURCE=... - Regenerate packaged icon assets"
+	@echo "  make generate-windows-resource - Regenerate Windows .syso icon resources"
+	@echo "  make package-macos-app - Build a macOS .app bundle on macOS"
+	@echo "  make build-desktop-windows - Build the Windows desktop executable"
 	@echo "  make package-deb    - Build a Debian package (.deb)"
 	@echo "  make package-appimage - Build an AppImage package (.AppImage)"
 	@echo "  make run            - Run in TUI mode"

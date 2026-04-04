@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -184,9 +185,27 @@ func (n *desktopNotifier) send(title, message string) {
 		return
 	}
 
-	cmd := exec.Command("notify-send", nextTitle, nextMessage, "--app-name=Agent Team Monitor")
+	cmd := desktopNotificationCommand(nextTitle, nextMessage)
+	if cmd == nil {
+		return
+	}
+
 	if err := cmd.Run(); err != nil {
 		// Ignore notification failures; desktop app should keep running.
+	}
+}
+
+func desktopNotificationCommand(title, message string) *exec.Cmd {
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf(`display notification %q with title %q`, message, title)
+		return exec.Command("osascript", "-e", script)
+	case "windows":
+		return nil
+	case "linux":
+		return exec.Command("notify-send", title, message, "--app-name=Agent Team Monitor")
+	default:
+		return nil
 	}
 }
 

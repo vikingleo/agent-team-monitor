@@ -217,6 +217,8 @@ func desktopIconThemePath() string {
 	candidates := []string{}
 	for _, prefix := range desktopInstallPrefixCandidates() {
 		candidates = append(candidates,
+			filepath.Join(prefix, "share", "icons", "hicolor", "64x64", "apps"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "32x32", "apps"),
 			filepath.Join(prefix, "share", "icons", "hicolor", "512x512", "apps"),
 			filepath.Join(prefix, "share", "icons", "hicolor", "256x256", "apps"),
 			filepath.Join(prefix, "share", "icons", "hicolor", "128x128", "apps"),
@@ -236,6 +238,8 @@ func desktopIconFilePath() string {
 	candidates := []string{}
 	for _, prefix := range desktopInstallPrefixCandidates() {
 		candidates = append(candidates,
+			filepath.Join(prefix, "share", "icons", "hicolor", "64x64", "apps", "agent-team-monitor.png"),
+			filepath.Join(prefix, "share", "icons", "hicolor", "32x32", "apps", "agent-team-monitor.png"),
 			filepath.Join(prefix, "share", "icons", "hicolor", "512x512", "apps", "agent-team-monitor.png"),
 			filepath.Join(prefix, "share", "icons", "hicolor", "256x256", "apps", "agent-team-monitor.png"),
 			filepath.Join(prefix, "share", "icons", "hicolor", "128x128", "apps", "agent-team-monitor.png"),
@@ -243,7 +247,11 @@ func desktopIconFilePath() string {
 		)
 	}
 	for _, root := range desktopAppRootCandidates() {
-		candidates = append(candidates, filepath.Join(root, "assets", "icons", "agent-team-monitor.png"))
+		candidates = append(candidates,
+			filepath.Join(root, "assets", "icons", "agent-team-monitor-64.png"),
+			filepath.Join(root, "assets", "icons", "agent-team-monitor-32.png"),
+			filepath.Join(root, "assets", "icons", "agent-team-monitor.png"),
+		)
 	}
 
 	for _, candidate := range candidates {

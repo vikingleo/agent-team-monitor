@@ -56,6 +56,8 @@ fi
 
 mkdir -p "${APPDIR}/usr/bin"
 mkdir -p "${APPDIR}/usr/share/applications"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/32x32/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/64x64/apps"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/128x128/apps"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/512x512/apps"
@@ -73,6 +75,10 @@ sed \
 install -m 0644 "${APPDIR}/usr/share/applications/agent-team-monitor.desktop" \
   "${APPDIR}/agent-team-monitor.desktop"
 
+install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-32.png" \
+  "${APPDIR}/usr/share/icons/hicolor/32x32/apps/agent-team-monitor.png"
+install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-64.png" \
+  "${APPDIR}/usr/share/icons/hicolor/64x64/apps/agent-team-monitor.png"
 install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-128.png" \
   "${APPDIR}/usr/share/icons/hicolor/128x128/apps/agent-team-monitor.png"
 install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-256.png" \

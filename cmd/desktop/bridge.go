@@ -226,12 +226,29 @@ func (b *desktopBridge) openExternal(target string) error {
 		return fmt.Errorf("unsupported external URL %q", target)
 	}
 
-	cmd := exec.Command("xdg-open", address)
+	cmd, err := desktopOpenCommand(address)
+	if err != nil {
+		return err
+	}
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open external URL: %w", err)
 	}
 
 	return nil
+}
+
+func desktopOpenCommand(address string) (*exec.Cmd, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", address), nil
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", address), nil
+	case "linux":
+		return exec.Command("xdg-open", address), nil
+	default:
+		return nil, fmt.Errorf("open external URL unsupported on %s", runtime.GOOS)
+	}
 }
 
 func (b *desktopBridge) setWindowTitle(title string) error {

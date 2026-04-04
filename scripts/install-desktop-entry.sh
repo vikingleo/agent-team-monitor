@@ -24,6 +24,8 @@ if [[ ! -x "${CLI_BIN}" ]]; then
 fi
 
 mkdir -p "${DESKTOP_TARGET_DIR}"
+mkdir -p "${ICON_TARGET_DIR}/32x32/apps"
+mkdir -p "${ICON_TARGET_DIR}/64x64/apps"
 mkdir -p "${ICON_TARGET_DIR}/128x128/apps"
 mkdir -p "${ICON_TARGET_DIR}/256x256/apps"
 mkdir -p "${ICON_TARGET_DIR}/512x512/apps"
@@ -32,6 +34,10 @@ mkdir -p "${LOCAL_BIN_DIR}"
 install -m 0755 "${CLI_BIN}" "${LOCAL_BIN_DIR}/agent-team-monitor"
 install -m 0755 "${APP_BIN}" "${LOCAL_BIN_DIR}/agent-team-monitor-desktop"
 
+install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-32.png" \
+  "${ICON_TARGET_DIR}/32x32/apps/agent-team-monitor.png"
+install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-64.png" \
+  "${ICON_TARGET_DIR}/64x64/apps/agent-team-monitor.png"
 install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-128.png" \
   "${ICON_TARGET_DIR}/128x128/apps/agent-team-monitor.png"
 install -m 0644 "${ROOT_DIR}/assets/icons/agent-team-monitor-256.png" \
