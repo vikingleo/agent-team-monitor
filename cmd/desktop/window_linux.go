@@ -74,6 +74,34 @@ static double atm_scroll_event_delta_y(GdkEventScroll *event) {
 	}
 }
 
+static double atm_scroll_event_x(GdkEventScroll *event) {
+	double x = 0;
+	double y = 0;
+	if (event == NULL) {
+		return 0;
+	}
+
+	if (gdk_event_get_coords((GdkEvent *)event, &x, &y)) {
+		return x;
+	}
+
+	return 0;
+}
+
+static double atm_scroll_event_y(GdkEventScroll *event) {
+	double x = 0;
+	double y = 0;
+	if (event == NULL) {
+		return 0;
+	}
+
+	if (gdk_event_get_coords((GdkEvent *)event, &x, &y)) {
+		return y;
+	}
+
+	return 0;
+}
+
 static guint atm_key_event_keyval(GdkEventKey *event) {
 	if (event == NULL) {
 		return 0;
@@ -96,6 +124,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -123,6 +152,7 @@ type desktopMainWindow struct {
 	webview     webview.WebView
 
 	mu             sync.Mutex
+	currentPath    string
 	quit           sync.Once
 	dispatchClosed atomic.Bool
 }
@@ -324,7 +354,9 @@ func (w *desktopMainWindow) loadInitialView() {
 		prefs = w.preferences.Get()
 	}
 
-	target := strings.TrimRight(w.session.BaseURL, "/") + prefs.startupRoute()
+	route := prefs.startupRoute()
+	w.SetPathname(route)
+	target := strings.TrimRight(w.session.BaseURL, "/") + route
 	w.webview.Navigate(target)
 }
 
@@ -423,6 +455,8 @@ func (w *desktopMainWindow) Navigate(target string) {
 		next = "/"
 	}
 
+	w.SetPathname(next)
+
 	if strings.HasPrefix(next, "http://") || strings.HasPrefix(next, "https://") {
 		w.webview.Navigate(next)
 		return
@@ -433,6 +467,28 @@ func (w *desktopMainWindow) Navigate(target string) {
 		next = "/" + next
 	}
 	w.webview.Navigate(base + next)
+}
+
+func (w *desktopMainWindow) SetPathname(pathname string) {
+	if w == nil {
+		return
+	}
+
+	w.mu.Lock()
+	w.currentPath = normalizeDesktopPath(pathname)
+	w.mu.Unlock()
+}
+
+func (w *desktopMainWindow) usesNativeScrollFallback() bool {
+	if w == nil {
+		return true
+	}
+
+	w.mu.Lock()
+	pathname := w.currentPath
+	w.mu.Unlock()
+
+	return !strings.HasPrefix(pathname, "/game")
 }
 
 func (w *desktopMainWindow) Bind(name string, fn interface{}) error {
@@ -594,6 +650,15 @@ func (w *desktopMainWindow) nativeScrollBy(delta int) bool {
 	return true
 }
 
+func (w *desktopMainWindow) nativeScrollAt(delta int, x, y float64) bool {
+	if w == nil || w.webview == nil || w.dispatchClosed.Load() {
+		return false
+	}
+
+	w.webview.Eval(fmt.Sprintf(`window.__ATM_NATIVE_SCROLL_FALLBACK__ && window.__ATM_NATIVE_SCROLL_FALLBACK__({ command: 'by', amount: %d, x: %.3f, y: %.3f });`, delta, x, y))
+	return true
+}
+
 func (w *desktopMainWindow) nativeScrollToEdge(bottom bool) bool {
 	if w == nil || w.webview == nil || w.dispatchClosed.Load() {
 		return false
@@ -614,9 +679,19 @@ func atmWindowScroll(widget *C.GtkWidget, event *C.GdkEventScroll, data C.gpoint
 		return C.FALSE
 	}
 
+	if !window.usesNativeScrollFallback() {
+		return C.FALSE
+	}
+
 	delta := int(C.atm_scroll_event_delta_y(event))
 	if delta == 0 {
 		return C.FALSE
+	}
+
+	x := float64(C.atm_scroll_event_x(event))
+	y := float64(C.atm_scroll_event_y(event))
+	if window.nativeScrollAt(delta, x, y) {
+		return C.TRUE
 	}
 
 	if window.nativeScrollBy(delta) {
@@ -630,6 +705,10 @@ func atmWindowScroll(widget *C.GtkWidget, event *C.GdkEventScroll, data C.gpoint
 func atmWindowKeyPress(widget *C.GtkWidget, event *C.GdkEventKey, data C.gpointer) C.gboolean {
 	window := currentActiveDesktopWindow()
 	if window == nil {
+		return C.FALSE
+	}
+
+	if !window.usesNativeScrollFallback() {
 		return C.FALSE
 	}
 
@@ -709,4 +788,32 @@ func desktopWindowIconPath() string {
 	}
 
 	return ""
+}
+
+func normalizeDesktopPath(pathname string) string {
+	trimmed := strings.TrimSpace(pathname)
+	if trimmed == "" {
+		return "/"
+	}
+
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		parsed, err := url.Parse(trimmed)
+		if err == nil && parsed != nil {
+			trimmed = parsed.Path
+		}
+	}
+
+	if hashIndex := strings.Index(trimmed, "#"); hashIndex >= 0 {
+		trimmed = trimmed[:hashIndex]
+	}
+	if queryIndex := strings.Index(trimmed, "?"); queryIndex >= 0 {
+		trimmed = trimmed[:queryIndex]
+	}
+	if trimmed == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+	return trimmed
 }

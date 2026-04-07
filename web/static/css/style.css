@@ -1203,11 +1203,13 @@ body[data-desktop-mode="1"] .view-switcher {
     gap: 14px;
     margin-top: 12px;
     align-items: start;
+    min-height: 0;
 }
 
 .agent-main-column,
 .agent-side-column {
     min-width: 0;
+    min-height: 0;
 }
 
 .agent-main-column {
@@ -1406,6 +1408,10 @@ body[data-desktop-mode="1"] .view-switcher {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-height: 0;
+    max-height: calc(100vh - 240px);
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 .timeline-item {
@@ -1847,6 +1853,12 @@ footer a:hover {
     .agent-signal-grid,
     .agent-layout {
         grid-template-columns: 1fr;
+    }
+
+    .agent-timeline {
+        max-height: none;
+        overflow-y: visible;
+        padding-right: 0;
     }
 }
 

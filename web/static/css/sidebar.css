@@ -10,6 +10,7 @@
     background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
     box-shadow: -12px 0 30px rgba(15, 23, 42, 0.12);
     display: flex;
+    align-items: stretch;
     z-index: 1000;
     overflow: visible;
     border-left: 1px solid rgba(148, 163, 184, 0.22);
@@ -26,6 +27,7 @@
     z-index: 1;
     padding: 8px 0;
     box-sizing: border-box;
+    min-height: 0;
 }
 
 .team-tab {
@@ -103,6 +105,8 @@
 /* 内容区域 */
 .sidebar-content {
     flex: 1;
+    min-height: 0;
+    height: 100%;
     overflow-y: auto;
     padding: 18px 16px 24px;
     box-sizing: border-box;
@@ -225,6 +229,19 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+}
+
+.sidebar-section-activity {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.sidebar-section-activity .activity-feed {
+    min-height: 0;
+    max-height: min(42vh, 420px);
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 .activity-item {
@@ -688,23 +705,27 @@
 
 /* 滚动条样式 */
 .sidebar-content::-webkit-scrollbar,
-.team-tabs::-webkit-scrollbar {
+.team-tabs::-webkit-scrollbar,
+.activity-feed::-webkit-scrollbar {
     width: 6px;
 }
 
 .sidebar-content::-webkit-scrollbar-track,
-.team-tabs::-webkit-scrollbar-track {
+.team-tabs::-webkit-scrollbar-track,
+.activity-feed::-webkit-scrollbar-track {
     background: rgba(241, 245, 249, 0.8);
 }
 
 .sidebar-content::-webkit-scrollbar-thumb,
-.team-tabs::-webkit-scrollbar-thumb {
+.team-tabs::-webkit-scrollbar-thumb,
+.activity-feed::-webkit-scrollbar-thumb {
     background: rgba(100, 116, 139, 0.55);
     border-radius: 999px;
 }
 
 .sidebar-content::-webkit-scrollbar-thumb:hover,
-.team-tabs::-webkit-scrollbar-thumb:hover {
+.team-tabs::-webkit-scrollbar-thumb:hover,
+.activity-feed::-webkit-scrollbar-thumb:hover {
     background: rgba(71, 85, 105, 0.8);
 }
 

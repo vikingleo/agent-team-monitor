@@ -9,6 +9,7 @@ export class Sidebar {
         this.previewContainer = null;
         this.previewTeamName = null;
         this.hidePreviewTimer = null;
+        this.handleContentWheel = this.handleContentWheel.bind(this);
         this.init();
     }
 
@@ -27,6 +28,7 @@ export class Sidebar {
         this.previewContainer = this.container.querySelector('#team-tab-preview');
 
         this.tabsContainer.addEventListener('scroll', () => this.hideTabPreview());
+        this.contentContainer.addEventListener('wheel', this.handleContentWheel, { passive: false });
         this.previewContainer.addEventListener('mouseenter', () => this.cancelHideTabPreview());
         this.previewContainer.addEventListener('mouseleave', () => this.hideTabPreview());
         this.previewContainer.addEventListener('click', () => {
@@ -142,6 +144,68 @@ export class Sidebar {
         }
     }
 
+    handleContentWheel(event) {
+        if (event.defaultPrevented || event.ctrlKey || Math.abs(event.deltaY) < 0.01) {
+            return;
+        }
+
+        const scrollTarget = this.findWheelScrollTarget(event.target, event.deltaY);
+        if (!(scrollTarget instanceof HTMLElement)) {
+            return;
+        }
+
+        const before = scrollTarget.scrollTop;
+        const next = before + event.deltaY;
+        const maxScrollTop = Math.max(0, scrollTarget.scrollHeight - scrollTarget.clientHeight);
+        scrollTarget.scrollTop = Math.max(0, Math.min(maxScrollTop, next));
+
+        if (scrollTarget.scrollTop !== before) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }
+
+    findWheelScrollTarget(startNode, deltaY) {
+        const fallback = this.contentContainer instanceof HTMLElement ? this.contentContainer : null;
+        let node = startNode instanceof Element ? startNode : fallback;
+
+        while (node && node !== this.container && node !== document.body && node !== document.documentElement) {
+            if (node instanceof HTMLElement && this.canWheelScroll(node, deltaY)) {
+                return node;
+            }
+
+            if (node === fallback) {
+                break;
+            }
+            node = node.parentElement;
+        }
+
+        return fallback && this.canWheelScroll(fallback, deltaY) ? fallback : null;
+    }
+
+    canWheelScroll(node, deltaY) {
+        const style = window.getComputedStyle(node);
+        const overflowY = style.overflowY || '';
+        if (!/(auto|scroll|overlay)/.test(overflowY)) {
+            return false;
+        }
+
+        const maxScrollTop = node.scrollHeight - node.clientHeight;
+        if (maxScrollTop <= 1) {
+            return false;
+        }
+
+        if (deltaY > 0) {
+            return node.scrollTop < maxScrollTop - 1;
+        }
+
+        if (deltaY < 0) {
+            return node.scrollTop > 1;
+        }
+
+        return false;
+    }
+
     hideTabPreview() {
         this.cancelHideTabPreview();
         this.previewTeamName = null;
@@ -190,7 +254,7 @@ export class Sidebar {
             </div>
 
             ${activityFeed.length > 0 ? `
-                <section class="sidebar-section">
+                <section class="sidebar-section sidebar-section-activity">
                     <div class="sidebar-section-header">
                         <div class="sidebar-section-title">最近活动</div>
                         <div class="sidebar-section-meta">${activityFeed.length} 条信号</div>
@@ -791,6 +855,9 @@ export class Sidebar {
 
     destroy() {
         this.hideTabPreview();
+        if (this.contentContainer) {
+            this.contentContainer.removeEventListener('wheel', this.handleContentWheel);
+        }
         if (this.container) {
             this.container.remove();
         }

@@ -20,37 +20,107 @@ func desktopBridgeInitJS(prefs desktopPreferences) string {
 window.__ATM_DESKTOP__ = true;
 window.__ATM_DESKTOP_BRIDGE_VERSION__ = 1;
 window.__ATM_DESKTOP_INITIAL_PREFERENCES__ = %s;
-window.__ATM_NATIVE_SCROLL_FALLBACK__ = function(command, amount) {
-  if ((window.location.pathname || '').startsWith('/game')) {
-    return false;
+window.__ATM_REPORT_DESKTOP_PATHNAME__ = function() {
+  if (typeof window.atmDesktopReportPathname === 'function') {
+    window.atmDesktopReportPathname(window.location.pathname || '/');
+  }
+};
+window.__ATM_NATIVE_SCROLL_FALLBACK__ = function(commandOrPayload, amount) {
+  var payload = commandOrPayload && typeof commandOrPayload === 'object'
+    ? commandOrPayload
+    : { command: commandOrPayload, amount: amount, x: arguments[2], y: arguments[3] };
+  var command = String(payload.command || 'by');
+  var delta = Number(payload.amount || 0);
+  var pointerX = Number(payload.x);
+  var pointerY = Number(payload.y);
+  var hasPointer = Number.isFinite(pointerX) && Number.isFinite(pointerY);
+  var pathname = window.location.pathname || '';
+
+  function applyScroll(root) {
+    if (!root) {
+      return false;
+    }
+
+    var maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
+    var before = root.scrollTop || 0;
+
+    if (command === 'top') {
+      root.scrollTop = 0;
+    } else if (command === 'bottom') {
+      root.scrollTop = maxScrollTop;
+    } else {
+      var next = before + delta;
+      if (next < 0) {
+        next = 0;
+      }
+      if (next > maxScrollTop) {
+        next = maxScrollTop;
+      }
+      root.scrollTop = next;
+    }
+
+    return root.scrollTop !== before;
+  }
+
+  function canScroll(node) {
+    if (!(node instanceof HTMLElement)) {
+      return false;
+    }
+
+    var overflowY = window.getComputedStyle(node).overflowY || '';
+    if (!/(auto|scroll|overlay)/.test(overflowY)) {
+      return false;
+    }
+
+    return node.scrollHeight > node.clientHeight + 1;
+  }
+
+  function findScrollableTarget(start, fallback) {
+    var node = start instanceof Element ? start : null;
+    while (node && node !== document.body && node !== document.documentElement) {
+      if (canScroll(node)) {
+        return node;
+      }
+      if (node === fallback) {
+        break;
+      }
+      node = node.parentElement;
+    }
+
+    return canScroll(fallback) ? fallback : null;
+  }
+
+  if (pathname.startsWith('/game')) {
+    var sidebarContent = document.querySelector('.sidebar-content');
+    var sidebarTabs = document.querySelector('.team-tabs');
+    if (!sidebarContent && !sidebarTabs) {
+      return false;
+    }
+
+    var hovered = hasPointer ? document.elementFromPoint(pointerX, pointerY) : null;
+    var sidebarTarget = null;
+
+    if (hovered instanceof Element) {
+      if (sidebarContent && sidebarContent.contains(hovered)) {
+        sidebarTarget = findScrollableTarget(hovered, sidebarContent);
+      } else if (sidebarTabs && sidebarTabs.contains(hovered)) {
+        sidebarTarget = findScrollableTarget(hovered, sidebarTabs);
+      }
+    }
+
+    if (!sidebarTarget) {
+      sidebarTarget = canScroll(sidebarContent) ? sidebarContent : sidebarTabs;
+    }
+
+    return applyScroll(sidebarTarget);
   }
 
   var root = document.getElementById('app-scroll-root') || document.scrollingElement || document.documentElement;
-  if (!root) {
-    return false;
-  }
-
-  var maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
-  var before = root.scrollTop || 0;
-
-  if (command === 'top') {
-    root.scrollTop = 0;
-  } else if (command === 'bottom') {
-    root.scrollTop = maxScrollTop;
-  } else {
-    var delta = Number(amount || 0);
-    var next = before + delta;
-    if (next < 0) {
-      next = 0;
-    }
-    if (next > maxScrollTop) {
-      next = maxScrollTop;
-    }
-    root.scrollTop = next;
-  }
-
-  return root.scrollTop !== before;
+  return applyScroll(root);
 };
+window.addEventListener('popstate', window.__ATM_REPORT_DESKTOP_PATHNAME__);
+window.addEventListener('hashchange', window.__ATM_REPORT_DESKTOP_PATHNAME__);
+window.setTimeout(window.__ATM_REPORT_DESKTOP_PATHNAME__, 0);
 `, string(payload))
 }
 
@@ -123,6 +193,9 @@ func (b *desktopBridge) bind(w desktopBridgeView) error {
 	}
 	if err := w.Bind("atmDesktopOpenAbout", b.openAboutWindow); err != nil {
 		return fmt.Errorf("bind atmDesktopOpenAbout: %w", err)
+	}
+	if err := w.Bind("atmDesktopReportPathname", b.reportPathname); err != nil {
+		return fmt.Errorf("bind atmDesktopReportPathname: %w", err)
 	}
 	return nil
 }
@@ -199,6 +272,19 @@ func (b *desktopBridge) navigate(target string) error {
 		b.view.Navigate(destination)
 	})
 	return nil
+}
+
+func (b *desktopBridge) reportPathname(pathname string) {
+	type pathReporter interface {
+		SetPathname(string)
+	}
+
+	reporter, ok := b.view.(pathReporter)
+	if !ok {
+		return
+	}
+
+	reporter.SetPathname(pathname)
 }
 
 func (b *desktopBridge) getPreferences() desktopPreferences {
