@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Team 监控器</title>
+    <title>多智能体团队操控台</title>
     <link rel="icon" type="image/png" href="/assets/favicon.png">
     <link rel="apple-touch-icon" href="/assets/agent-team-monitor.png">
     <script>
@@ -28,13 +28,13 @@
                 <span class="header-logo">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                 </span>
-                Agent Team Monitor
-                <small class="header-subtitle">for Claude + Codex + OpenClaw</small>
+                多智能体团队操控台
+                <small class="header-subtitle">面向 Claude、Codex、OpenClaw 的可视化操控与活动流</small>
             </h1>
             <div class="header-info">
                 <div class="header-controls">
                     <nav class="view-switcher" aria-label="视图切换">
-                        <a class="view-switcher-link active" href="/" data-desktop-target="/" aria-current="page">监控面板</a>
+                        <a class="view-switcher-link active" href="/" data-desktop-target="/" aria-current="page">操控面板</a>
                         <a class="view-switcher-link" href="/game/" data-desktop-target="/game/">办公场景</a>
                     </nav>
                     <div class="theme-switcher" role="group" aria-label="主题切换">
@@ -44,7 +44,7 @@
                 </div>
                 <div class="desktop-toolbar" id="desktop-toolbar" hidden>
                     <span class="desktop-pill" id="desktop-context-pill">桌面应用</span>
-                    <span class="desktop-toolbar-view" id="desktop-current-view">监控面板</span>
+                    <span class="desktop-toolbar-view" id="desktop-current-view">操控面板</span>
                     <button class="desktop-toolbar-button" id="desktop-settings-button" type="button">桌面设置</button>
                     <button class="desktop-toolbar-button" id="desktop-about-button" type="button">关于</button>
                     <button class="desktop-toolbar-button" id="desktop-refresh-button" type="button">立即刷新</button>
@@ -54,6 +54,8 @@
                 <div class="header-meta">
                     <span id="last-update">最后更新: --:--:--</span>
                     <span class="status-indicator" id="connection-status"><span class="status-dot"></span> 已连接</span>
+                    <span class="admin-indicator" id="admin-auth-status">管理：未配置</span>
+                    <button class="header-auth-button" id="admin-auth-button" type="button">管理员登录</button>
                 </div>
             </div>
         </header>
@@ -63,19 +65,22 @@
                 <div class="filter-group" id="provider-filter">
                     <button class="filter-chip active" data-provider="all">全部</button>
                     <button class="filter-chip" data-provider="claude">
-                        Claude <span class="filter-chip-count" id="claude-filter-count">(team:0,agent:0)</span>
+                        Claude <span class="filter-chip-count" id="claude-filter-count">(团队:0,成员:0)</span>
                     </button>
                     <button class="filter-chip" data-provider="codex">
-                        Codex <span class="filter-chip-count" id="codex-filter-count">(team:0,agent:0)</span>
+                        Codex <span class="filter-chip-count" id="codex-filter-count">(团队:0,成员:0)</span>
                     </button>
                     <button class="filter-chip" data-provider="openclaw">
-                        OpenClaw <span class="filter-chip-count" id="openclaw-filter-count">(team:0,agent:0)</span>
+                        OpenClaw <span class="filter-chip-count" id="openclaw-filter-count">(团队:0,成员:0)</span>
                     </button>
                 </div>
-                <label class="filter-toggle" for="hide-idle-toggle">
-                    <input id="hide-idle-toggle" type="checkbox" checked>
-                    自动隐藏空闲
-                </label>
+                <div class="view-actions">
+                    <label class="filter-toggle" for="hide-idle-toggle">
+                        <input id="hide-idle-toggle" type="checkbox" checked>
+                        自动隐藏空闲
+                    </label>
+                    <button id="managed-team-open-modal" type="button" class="agent-command-submit managed-team-open-button">创建团队</button>
+                </div>
             </div>
 
             <div class="tabs">
@@ -90,7 +95,7 @@
             </div>
 
             <div id="teams-tab" class="tab-content active">
-                <div id="teams-container">
+                <div id="teams-container" class="control-workspace-mount">
                     <p class="loading">加载中...</p>
                 </div>
             </div>
@@ -103,21 +108,21 @@
         </main>
 
         <footer>
-            <p>每秒自动刷新 | <a href="/game/">办公场景视图</a> | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a> + <a href="https://openai.com" target="_blank">Codex</a> + <a href="https://github.com/openclaw/openclaw" target="_blank">OpenClaw</a> | <a href="https://github.com/vikingleo/agent-team-monitor" target="_blank">Github</a></p>
+            <p>每秒自动刷新 | <a href="/game/">办公场景视图</a> | <a href="https://github.com/anthropics/claude-code" target="_blank">Claude Code</a> + <a href="https://openai.com" target="_blank">Codex</a> + <a href="https://github.com/openclaw/openclaw" target="_blank">OpenClaw</a> | <a href="https://github.com/vikingleo/agent-team-monitor" target="_blank">项目仓库</a></p>
         </footer>
     </div>
 
     <nav id="team-nav" class="team-nav"></nav>
     <div class="desktop-settings-panel" id="desktop-settings-panel" hidden>
         <div class="desktop-settings-card">
-            <div class="desktop-settings-title">桌面设置</div>
-            <label class="desktop-settings-field" for="desktop-startup-view-select">
-                <span>默认启动视图</span>
-                <select id="desktop-startup-view-select">
-                    <option value="dashboard">监控面板</option>
-                    <option value="game">办公场景</option>
-                </select>
-            </label>
+                <div class="desktop-settings-title">桌面设置</div>
+                <label class="desktop-settings-field" for="desktop-startup-view-select">
+                    <span>默认启动视图</span>
+                    <select id="desktop-startup-view-select">
+                        <option value="dashboard">操控面板</option>
+                        <option value="game">办公场景</option>
+                    </select>
+                </label>
             <label class="desktop-settings-field" for="desktop-provider-filter-select">
                 <span>团队来源筛选</span>
                 <select id="desktop-provider-filter-select">
@@ -163,6 +168,78 @@
                 </svg>
             </button>
             <div id="agent-detail-content" class="agent-detail-content"></div>
+        </div>
+    </div>
+    <div id="auth-modal" class="agent-detail-modal auth-modal" hidden>
+        <div class="agent-detail-backdrop" data-close-auth-modal="true"></div>
+        <div class="agent-detail-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+            <button class="agent-detail-close" type="button" data-close-auth-modal="true" aria-label="关闭登录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 6L6 18"/>
+                    <path d="M6 6l12 12"/>
+                </svg>
+            </button>
+            <div class="agent-detail-content">
+                <div class="agent-detail-header">
+                    <div class="agent-detail-title-wrap">
+                        <div id="auth-modal-title" class="agent-detail-title">管理员登录</div>
+                        <div class="agent-detail-subtitle">未登录时仅允许浏览，不可发送消息和修改设置</div>
+                    </div>
+                </div>
+                <form id="auth-login-form" class="auth-form">
+                    <label class="auth-field">
+                        <span>账号</span>
+                        <input id="auth-username" type="text" autocomplete="username" required>
+                    </label>
+                    <label class="auth-field">
+                        <span>密码</span>
+                        <input id="auth-password" type="password" autocomplete="current-password" required>
+                    </label>
+                    <div class="auth-actions">
+                        <button id="auth-submit-button" type="submit" class="agent-command-submit">登录</button>
+                        <span id="auth-feedback" class="agent-command-feedback"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div id="managed-team-modal" class="agent-detail-modal managed-team-modal" hidden>
+        <div class="agent-detail-backdrop" data-close-managed-team-modal="true"></div>
+        <div class="agent-detail-dialog managed-team-dialog" role="dialog" aria-modal="true" aria-labelledby="managed-team-modal-title">
+            <button class="agent-detail-close" type="button" data-close-managed-team-modal="true" aria-label="关闭创建团队">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 6L6 18"/>
+                    <path d="M6 6l12 12"/>
+                </svg>
+            </button>
+            <div class="agent-detail-content">
+                <div class="agent-detail-header">
+                    <div class="agent-detail-title-wrap">
+                        <div id="managed-team-modal-title" class="agent-detail-title">创建受管团队</div>
+                        <div class="agent-detail-subtitle">通过弹窗创建，避免长期占用主操控区。</div>
+                    </div>
+                </div>
+                <form id="managed-team-form" class="managed-team-form managed-team-modal-form">
+                    <input id="managed-team-name" type="text" placeholder="团队名称，如 db-manage-lead" required>
+                    <input id="managed-team-workspace" type="text" placeholder="工作目录，如 /home/vkleo/works/go-project/db-manage" required>
+                    <input id="managed-team-model" type="text" placeholder="模型，可选，如 claude-opus-4-1">
+                    <select id="managed-team-permission">
+                        <option value="">默认权限</option>
+                        <option value="default">默认</option>
+                        <option value="acceptEdits">自动接受修改</option>
+                        <option value="bypassPermissions">跳过权限限制</option>
+                    </select>
+                    <label class="filter-toggle managed-autostart-toggle" for="managed-team-autostart">
+                        <input id="managed-team-autostart" type="checkbox" checked>
+                        创建后立即启动全部成员
+                    </label>
+                    <textarea id="managed-team-initial-task" class="agent-command-input" rows="4" placeholder="可选：创建并启动后，默认发给主成员的首条任务"></textarea>
+                    <div class="managed-team-actions-row">
+                        <button id="managed-team-submit" type="submit" class="agent-command-submit">创建受管团队</button>
+                        <span id="managed-team-feedback" class="agent-command-feedback"></span>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
     <script src="/js/desktop-bridge.js"></script>

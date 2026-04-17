@@ -5,9 +5,17 @@ import "time"
 // TeamInfo represents a Claude agent team
 type TeamInfo struct {
 	Name          string      `json:"name"`
-	Provider      string      `json:"provider,omitempty"` // claude, codex, openclaw
+	Provider      string      `json:"provider,omitempty"`     // claude, codex, openclaw
+	ControlMode   string      `json:"control_mode,omitempty"` // managed, imported
+	Managed       bool        `json:"managed,omitempty"`
+	ManagedTeamID string      `json:"managed_team_id,omitempty"`
+	ManagedStatus string      `json:"managed_status,omitempty"`
+	Controllable  bool        `json:"controllable,omitempty"`
+	LogPath       string      `json:"log_path,omitempty"`
+	LastError     string      `json:"last_error,omitempty"`
 	CreatedAt     time.Time   `json:"created_at"`
 	SortKey       string      `json:"-"`
+	InboxTeamName string      `json:"-"`
 	LeadSessionID string      `json:"lead_session_id,omitempty"`
 	ProjectCwd    string      `json:"project_cwd,omitempty"`
 	Members       []AgentInfo `json:"members"`
@@ -17,7 +25,7 @@ type TeamInfo struct {
 
 // AgentEvent represents a recent observable event for an agent.
 type AgentEvent struct {
-	Kind      string    `json:"kind"`                // response, message, thinking, tool, status
+	Kind      string    `json:"kind"`                // response, message, thinking, tool, tool_result, terminal, terminal_output, task, status
 	Title     string    `json:"title,omitempty"`     // Short UI label
 	Text      string    `json:"text"`                // Full display text
 	Source    string    `json:"source,omitempty"`    // inbox, activity_log, codex_session, openclaw_session
@@ -42,11 +50,14 @@ type AgentInfo struct {
 	LatestResponse  string    `json:"latest_response,omitempty"` // Latest full outbound response text
 	LastMessageTime time.Time `json:"last_message_time,omitempty"`
 	// Activity tracking from jsonl logs
-	LastThinking   string       `json:"last_thinking,omitempty"`    // Latest thinking/reasoning
-	LastToolUse    string       `json:"last_tool_use,omitempty"`    // Latest tool name (Read, Edit, Bash, etc.)
-	LastToolDetail string       `json:"last_tool_detail,omitempty"` // Tool usage details
-	LastActiveTime time.Time    `json:"last_active_time,omitempty"` // Last activity timestamp from logs
-	RecentEvents   []AgentEvent `json:"recent_events,omitempty"`    // Full recent timeline for Web UI
+	LastThinking      string       `json:"last_thinking,omitempty"`    // Latest thinking/reasoning
+	LastToolUse       string       `json:"last_tool_use,omitempty"`    // Latest tool name (Read, Edit, Bash, etc.)
+	LastToolDetail    string       `json:"last_tool_detail,omitempty"` // Tool usage details
+	LastActiveTime    time.Time    `json:"last_active_time,omitempty"` // Last activity timestamp from logs
+	RecentEvents      []AgentEvent `json:"recent_events,omitempty"`    // Full recent timeline for Web UI
+	SessionEntrypoint string       `json:"session_entrypoint,omitempty"`
+	CommandTransport  string       `json:"command_transport,omitempty"` // claude_inbox
+	CommandReason     string       `json:"command_reason,omitempty"`
 	// TodoWrite items from ~/.claude/todos/
 	Todos []TodoItem `json:"todos,omitempty"`
 }

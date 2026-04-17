@@ -1,6 +1,9 @@
 package monitor
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -59,6 +62,7 @@ type Collector struct {
 	state                   *types.MonitorState
 	stateMutex              sync.RWMutex
 	updateChan              chan struct{}
+	stopChan                chan struct{}
 	stopOnce                sync.Once
 	lastDiscoveryMetrics    parser.DiscoveryMetrics
 	lastDiscoveryMetricsLog time.Time
@@ -82,15 +86,23 @@ func NewCollectorWithOptions(options CollectorOptions) (*Collector, error) {
 			UpdatedAt: time.Now(),
 		},
 		updateChan: make(chan struct{}, 1),
+		stopChan:   make(chan struct{}),
 	}
 
 	// Create filesystem monitor with callback
 	fsMonitor, err := NewFileSystemMonitor(FileSystemMonitorOptions{
 		Provider: provider,
 	}, func(event fsnotify.Event) {
+		select {
+		case <-c.stopChan:
+			return
+		default:
+		}
+
 		// Trigger state update on filesystem changes
 		select {
 		case c.updateChan <- struct{}{}:
+		case <-c.stopChan:
 		default:
 		}
 	})
@@ -126,16 +138,31 @@ func (c *Collector) periodicUpdate() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		c.updateState()
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case <-ticker.C:
+			c.updateState()
+		}
 	}
 }
 
 // eventDrivenUpdate updates state on filesystem events
 func (c *Collector) eventDrivenUpdate() {
-	for range c.updateChan {
-		time.Sleep(100 * time.Millisecond) // Debounce
-		c.updateState()
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case <-c.updateChan:
+			time.Sleep(100 * time.Millisecond) // Debounce
+			select {
+			case <-c.stopChan:
+				return
+			default:
+			}
+			c.updateState()
+		}
 	}
 }
 
@@ -181,6 +208,7 @@ func (c *Collector) collectClaudeTeams(homeDir string) []types.TeamInfo {
 	teamsDir := filepath.Join(homeDir, ".claude", "teams")
 	tasksDir := filepath.Join(homeDir, ".claude", "tasks")
 	projectsDir := filepath.Join(homeDir, ".claude", "projects")
+	sessionsDir := filepath.Join(homeDir, ".claude", "sessions")
 
 	teams, err := parser.ScanTeams(teamsDir)
 	if err != nil {
@@ -200,6 +228,13 @@ func (c *Collector) collectClaudeTeams(homeDir string) []types.TeamInfo {
 		c.logDiscoveryMetrics(discoveryElapsed, discoveredTeams)
 	}
 
+	standaloneSessions, err := parser.DiscoverClaudeSessions(sessionsDir, 0)
+	if err != nil {
+		log.Printf("Error discovering claude sessions: %v", err)
+	} else {
+		teams = mergeStandaloneClaudeSessions(teams, standaloneSessions)
+	}
+
 	for i := range teams {
 		// Load visible tasks (excluding internal tasks)
 		tasks, err := parser.ScanTasks(tasksDir, teams[i].Name)
@@ -210,6 +245,7 @@ func (c *Collector) collectClaudeTeams(homeDir string) []types.TeamInfo {
 		teams[i].Tasks = tasks
 		c.updateVirtualTeamTimestamp(&teams[i], tasks)
 		c.populateTeamProjectCwd(&teams[i], projectsDir)
+		c.populateTeamInboxTarget(&teams[i], teamsDir, projectsDir)
 
 		// Load all tasks (including internal) for status calculation
 		allTasks, err := parser.ScanAllTasks(tasksDir, teams[i].Name)
@@ -230,6 +266,7 @@ func (c *Collector) collectClaudeTeams(homeDir string) []types.TeamInfo {
 		// Build shared office narrative fields for TUI/Web
 		c.buildAgentNarratives(&teams[i])
 		markTeamProvider(&teams[i], "claude")
+		c.updateAgentCommandCapabilities(&teams[i], teamsDir)
 	}
 
 	return filterStaleTeams(teams, time.Hour, tasksDir)
@@ -1291,6 +1328,9 @@ func mergeDiscoveredMembers(existing, discovered []types.AgentInfo) []types.Agen
 			if merged.AgentType == "" {
 				merged.AgentType = member.AgentType
 			}
+			if merged.SessionEntrypoint == "" {
+				merged.SessionEntrypoint = member.SessionEntrypoint
+			}
 			if merged.Cwd == "" {
 				merged.Cwd = member.Cwd
 			}
@@ -1310,6 +1350,125 @@ func mergeDiscoveredMembers(existing, discovered []types.AgentInfo) []types.Agen
 	}
 
 	return existing
+}
+
+func mergeStandaloneClaudeSessions(teams []types.TeamInfo, sessions []parser.ClaudeSessionDiscovery) []types.TeamInfo {
+	if len(sessions) == 0 {
+		return teams
+	}
+
+	nameToIndex := make(map[string]int, len(teams))
+	sessionToIndex := make(map[string]int, len(teams))
+
+	for i, team := range teams {
+		nameToIndex[team.Name] = i
+		if team.LeadSessionID != "" {
+			sessionToIndex[team.LeadSessionID] = i
+		}
+	}
+
+	for _, found := range sessions {
+		targetIdx := -1
+		if found.SessionID != "" {
+			if idx, ok := sessionToIndex[found.SessionID]; ok {
+				targetIdx = idx
+			}
+		}
+
+		resolvedName := standaloneClaudeTeamName(found)
+		if targetIdx == -1 && hasConflictingStandaloneName(nameToIndex, teams, resolvedName, found.SessionID) {
+			resolvedName = discoveredFallbackTeamName(found.SessionID, found.Cwd)
+		}
+
+		member := types.AgentInfo{
+			Name:              "team-lead",
+			Provider:          "claude",
+			AgentID:           found.SessionID,
+			AgentType:         "claude",
+			Status:            "unknown",
+			LastActivity:      found.StartedAt,
+			SessionEntrypoint: found.Entrypoint,
+			LastActiveTime: func() time.Time {
+				if !found.LastSeenAt.IsZero() {
+					return found.LastSeenAt
+				}
+				return found.StartedAt
+			}(),
+			Cwd: found.Cwd,
+		}
+
+		createdAt := found.StartedAt
+		if createdAt.IsZero() {
+			createdAt = found.LastSeenAt
+		}
+		if createdAt.IsZero() {
+			createdAt = time.Now()
+		}
+
+		if targetIdx == -1 {
+			teams = append(teams, types.TeamInfo{
+				Name:          resolvedName,
+				Provider:      "claude",
+				CreatedAt:     createdAt,
+				SortKey:       standaloneClaudeTeamSortKey(found, resolvedName),
+				LeadSessionID: found.SessionID,
+				ProjectCwd:    found.Cwd,
+				Members:       []types.AgentInfo{member},
+				Tasks:         []types.TaskInfo{},
+			})
+			targetIdx = len(teams) - 1
+			nameToIndex[resolvedName] = targetIdx
+		} else {
+			team := &teams[targetIdx]
+			if team.Provider == "" {
+				team.Provider = "claude"
+			}
+			if team.LeadSessionID == "" {
+				team.LeadSessionID = found.SessionID
+			}
+			if team.ProjectCwd == "" {
+				team.ProjectCwd = found.Cwd
+			}
+			if team.CreatedAt.IsZero() || createdAt.Before(team.CreatedAt) {
+				team.CreatedAt = createdAt
+			}
+			team.Members = mergeDiscoveredMembers(team.Members, []types.AgentInfo{member})
+		}
+
+		if teams[targetIdx].LeadSessionID != "" {
+			sessionToIndex[teams[targetIdx].LeadSessionID] = targetIdx
+		}
+	}
+
+	return teams
+}
+
+func hasConflictingStandaloneName(nameToIndex map[string]int, teams []types.TeamInfo, teamName, sessionID string) bool {
+	idx, ok := nameToIndex[teamName]
+	if !ok {
+		return false
+	}
+	if idx < 0 || idx >= len(teams) {
+		return false
+	}
+	return teams[idx].LeadSessionID != "" && teams[idx].LeadSessionID != sessionID
+}
+
+func standaloneClaudeTeamName(found parser.ClaudeSessionDiscovery) string {
+	if base := strings.TrimSpace(filepath.Base(found.Cwd)); base != "" && base != "." && base != string(filepath.Separator) {
+		return "claude-" + base
+	}
+	return discoveredFallbackTeamName(found.SessionID, found.Cwd)
+}
+
+func standaloneClaudeTeamSortKey(found parser.ClaudeSessionDiscovery, resolvedName string) string {
+	if strings.TrimSpace(found.Cwd) != "" {
+		return "claude-session:cwd:" + strings.ToLower(strings.TrimSpace(found.Cwd))
+	}
+	if strings.TrimSpace(found.SessionID) != "" {
+		return "claude-session:id:" + strings.ToLower(strings.TrimSpace(found.SessionID))
+	}
+	return "claude-session:name:" + strings.ToLower(strings.TrimSpace(resolvedName))
 }
 
 func memberMergeKey(member types.AgentInfo) string {
@@ -1383,11 +1542,45 @@ func (c *Collector) populateTeamProjectCwd(team *types.TeamInfo, projectsDir str
 	}
 }
 
+func (c *Collector) populateTeamInboxTarget(team *types.TeamInfo, teamsDir, projectsDir string) {
+	if team == nil {
+		return
+	}
+	if team.InboxTeamName != "" {
+		return
+	}
+
+	if team.ConfigPath != "" {
+		team.InboxTeamName = team.Name
+		return
+	}
+
+	if team.LeadSessionID == "" {
+		inboxesDir := filepath.Join(teamsDir, team.Name, "inboxes")
+		if entries, err := os.ReadDir(inboxesDir); err == nil && len(entries) > 0 {
+			team.InboxTeamName = team.Name
+		}
+		return
+	}
+
+	teamName, err := parser.FindSessionTeamName(projectsDir, team.LeadSessionID)
+	if err != nil {
+		log.Printf("Error resolving inbox team for %s (session %s): %v", team.Name, team.LeadSessionID, err)
+		return
+	}
+	team.InboxTeamName = strings.TrimSpace(teamName)
+}
+
 // loadAgentInboxes loads inbox messages for all agents in a team
 func (c *Collector) loadAgentInboxes(team *types.TeamInfo, teamsDir string) {
+	inboxTeamName := team.Name
+	if strings.TrimSpace(team.InboxTeamName) != "" {
+		inboxTeamName = team.InboxTeamName
+	}
+
 	for i := range team.Members {
 		agent := &team.Members[i]
-		message, err := parser.ParseInbox(teamsDir, team.Name, agent.Name)
+		message, err := parser.ParseInbox(teamsDir, inboxTeamName, agent.Name)
 		if err != nil {
 			log.Printf("Error parsing inbox for %s: %v", agent.Name, err)
 			continue
@@ -1398,13 +1591,13 @@ func (c *Collector) loadAgentInboxes(team *types.TeamInfo, teamsDir string) {
 			agent.LastMessageTime = message.Timestamp
 		}
 
-		messages, err := parser.ParseInboxMessages(teamsDir, team.Name, agent.Name)
+		messages, err := parser.ParseInboxMessages(teamsDir, inboxTeamName, agent.Name)
 		if err != nil {
 			log.Printf("Error parsing inbox history for %s: %v", agent.Name, err)
 			continue
 		}
 
-		for j := len(messages) - 1; j >= 0 && len(agent.RecentEvents) < 8; j-- {
+		for j := len(messages) - 1; j >= 0 && len(agent.RecentEvents) < 24; j-- {
 			text := strings.TrimSpace(messages[j].Text)
 			if text == "" {
 				continue
@@ -1427,6 +1620,148 @@ func (c *Collector) loadAgentInboxes(team *types.TeamInfo, teamsDir string) {
 	}
 }
 
+func (c *Collector) updateAgentCommandCapabilities(team *types.TeamInfo, teamsDir string) {
+	if team == nil {
+		return
+	}
+
+	for i := range team.Members {
+		agent := &team.Members[i]
+		agent.CommandTransport = ""
+		agent.CommandReason = ""
+
+		if team.Provider != "claude" && agent.Provider != "claude" {
+			agent.CommandReason = "当前仅支持 Claude 会话"
+			continue
+		}
+		if strings.TrimSpace(team.InboxTeamName) == "" {
+			switch strings.TrimSpace(agent.SessionEntrypoint) {
+			case "claude-vscode":
+				agent.CommandReason = "当前是 VS Code Claude 会话，输入通道是私有 socket，监控器暂不支持直接注入消息"
+			case "cli":
+				agent.CommandReason = "当前 CLI 会话未暴露可写的 team inbox，监控器暂不支持直接注入消息"
+			default:
+				agent.CommandReason = "当前会话没有可解析的运行时 team inbox"
+			}
+			continue
+		}
+
+		inboxPath := filepath.Join(teamsDir, team.InboxTeamName, "inboxes", agent.Name+".json")
+		if agent.Name == "team-lead" {
+			agent.CommandTransport = "claude_inbox"
+			continue
+		}
+		if _, err := os.Stat(inboxPath); err == nil {
+			agent.CommandTransport = "claude_inbox"
+			continue
+		}
+
+		agent.CommandReason = "未发现该 agent 的 inbox 文件"
+	}
+}
+
+func (c *Collector) SendAgentMessage(teamName, agentName, text string) error {
+	text = strings.TrimSpace(text)
+	if teamName == "" || agentName == "" {
+		return fmt.Errorf("team and agent are required")
+	}
+	if text == "" {
+		return fmt.Errorf("message is empty")
+	}
+
+	c.stateMutex.RLock()
+	var teamSnapshot types.TeamInfo
+	var agentSnapshot types.AgentInfo
+	teamFound := false
+	agentFound := false
+	for i := range c.state.Teams {
+		if c.state.Teams[i].Name != teamName {
+			continue
+		}
+		teamSnapshot = c.state.Teams[i]
+		teamFound = true
+		for j := range c.state.Teams[i].Members {
+			if c.state.Teams[i].Members[j].Name == agentName {
+				agentSnapshot = c.state.Teams[i].Members[j]
+				agentFound = true
+				break
+			}
+		}
+		break
+	}
+	c.stateMutex.RUnlock()
+
+	if !teamFound {
+		return fmt.Errorf("team %q not found", teamName)
+	}
+	if !agentFound {
+		return fmt.Errorf("agent %q not found", agentName)
+	}
+	if agentSnapshot.CommandTransport != "claude_inbox" {
+		reason := strings.TrimSpace(agentSnapshot.CommandReason)
+		if reason == "" {
+			reason = "agent does not support direct messaging"
+		}
+		return errors.New(reason)
+	}
+	if strings.TrimSpace(teamSnapshot.InboxTeamName) == "" {
+		return fmt.Errorf("missing inbox team target")
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	teamsDir := filepath.Join(homeDir, ".claude", "teams")
+	inboxPath := filepath.Join(teamsDir, teamSnapshot.InboxTeamName, "inboxes", agentSnapshot.Name+".json")
+	if err := appendInboxMessage(inboxPath, "agent-team-monitor", text); err != nil {
+		return err
+	}
+
+	select {
+	case c.updateChan <- struct{}{}:
+	case <-c.stopChan:
+	default:
+	}
+
+	return nil
+}
+
+func appendInboxMessage(path, from, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create inbox dir: %w", err)
+	}
+
+	messages := make([]map[string]interface{}, 0, 4)
+	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		if err := json.Unmarshal(data, &messages); err != nil {
+			return fmt.Errorf("parse inbox: %w", err)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read inbox: %w", err)
+	}
+
+	messages = append(messages, map[string]interface{}{
+		"from":      from,
+		"text":      text,
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"read":      false,
+	})
+
+	payload, err := json.MarshalIndent(messages, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal inbox: %w", err)
+	}
+	payload = append(payload, '\n')
+
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, payload, 0o644); err != nil {
+		return fmt.Errorf("write temp inbox: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace inbox: %w", err)
+	}
+
+	return nil
+}
+
 // loadAgentActivities loads recent activities from agent jsonl logs
 func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string) {
 	homeDir, _ := os.UserHomeDir()
@@ -1438,7 +1773,17 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 
 		// Find agent's log file by member identity first, then cwd fallback
 		logPath, agentID, sessionID, err := parser.FindAgentLogFileForMember(projectsDir, team.LeadSessionID, agent.Name, agent.Cwd, agent.JoinedAt)
-		if err != nil || logPath == "" || agentID == "" {
+		if err != nil {
+			continue
+		}
+		if (logPath == "" || agentID == "") && agent.Name == "team-lead" && leadLogPath != "" {
+			logPath = leadLogPath
+			agentID = team.LeadSessionID
+			if sessionID == "" {
+				sessionID = team.LeadSessionID
+			}
+		}
+		if logPath == "" || agentID == "" {
 			continue
 		}
 
@@ -1508,7 +1853,7 @@ func (c *Collector) loadAgentActivities(team *types.TeamInfo, projectsDir string
 			}
 		}
 
-		agent.RecentEvents = compactAgentEvents(agent.RecentEvents, 10)
+		agent.RecentEvents = compactAgentEvents(agent.RecentEvents, 24)
 	}
 }
 
@@ -1803,7 +2148,7 @@ func (c *Collector) DeleteTeam(teamName string) error {
 func (c *Collector) Stop() error {
 	var err error
 	c.stopOnce.Do(func() {
-		close(c.updateChan)
+		close(c.stopChan)
 		err = c.fsMonitor.Stop()
 	})
 	return err

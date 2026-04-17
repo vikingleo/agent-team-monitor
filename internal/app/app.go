@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/liaoweijun/agent-team-monitor/pkg/api"
+	"github.com/liaoweijun/agent-team-monitor/pkg/managed"
 	"github.com/liaoweijun/agent-team-monitor/pkg/monitor"
 	"github.com/liaoweijun/agent-team-monitor/pkg/ui"
 	"github.com/liaoweijun/agent-team-monitor/web"
@@ -30,6 +31,8 @@ type Config struct {
 type WebSession struct {
 	Collector *monitor.Collector
 	Server    *api.Server
+	Auth      *api.AuthManager
+	Managed   *managed.Manager
 	Addr      string
 	BaseURL   string
 
@@ -95,7 +98,13 @@ func StartWeb(provider, requestedAddr string) (*WebSession, error) {
 		return nil, err
 	}
 
-	server := api.NewServer(collector, resolvedAddr, staticFS)
+	auth := api.NewAuthManagerFromEnv()
+	managedManager, err := managed.NewManager()
+	if err != nil {
+		collector.Stop()
+		return nil, fmt.Errorf("init managed manager: %w", err)
+	}
+	server := api.NewServer(collector, resolvedAddr, staticFS, auth, managedManager)
 	listener, err := net.Listen("tcp", resolvedAddr)
 	if err != nil {
 		collector.Stop()
@@ -106,6 +115,8 @@ func StartWeb(provider, requestedAddr string) (*WebSession, error) {
 	session := &WebSession{
 		Collector: collector,
 		Server:    server,
+		Auth:      auth,
+		Managed:   managedManager,
 		Addr:      actualAddr,
 		BaseURL:   buildLocalhostURL(actualAddr),
 	}

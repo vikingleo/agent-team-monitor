@@ -42,6 +42,18 @@ async function deleteDesktopTeam(teamName) {
     return await window.atmDesktopDeleteTeam(teamName);
 }
 
+async function sendDesktopAgentMessage(teamName, agentName, text) {
+    if (!isDesktopModeEnabled()) {
+        throw new Error('desktop bridge unavailable');
+    }
+
+    if (typeof window.atmDesktopSendAgentMessage !== 'function') {
+        throw new Error('desktop agent message bridge unavailable');
+    }
+
+    return await window.atmDesktopSendAgentMessage(teamName, agentName, text);
+}
+
 async function getDesktopContext() {
     if (!isDesktopModeEnabled()) {
         throw new Error('desktop bridge unavailable');
@@ -188,6 +200,7 @@ window.AgentMonitorDesktopBridge = {
     isDesktopModeEnabled,
     fetchDesktopState,
     deleteDesktopTeam,
+    sendDesktopAgentMessage,
     getDesktopContext,
     quitDesktopApp,
     navigateDesktopApp,

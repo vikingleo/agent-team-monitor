@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/liaoweijun/agent-team-monitor/pkg/api"
 	"github.com/liaoweijun/agent-team-monitor/pkg/monitor"
 	"github.com/liaoweijun/agent-team-monitor/pkg/types"
 )
@@ -37,6 +38,17 @@ func newTestDesktopPreferencesController() *desktopPreferencesController {
 	return newDesktopPreferencesController(newInMemoryDesktopPreferencesStore(), nil, nil)
 }
 
+func newConfiguredAuthenticatedTestAuthManager(t *testing.T) *api.AuthManager {
+	t.Helper()
+	t.Setenv("ATM_ADMIN_USERNAME", "admin")
+	t.Setenv("ATM_ADMIN_PASSWORD", "secret")
+	manager := api.NewAuthManagerFromEnv()
+	if err := manager.Login("admin", "secret"); err != nil {
+		t.Fatalf("login test auth manager: %v", err)
+	}
+	return manager
+}
+
 func TestDesktopBridgeGetState_ReturnsJSONPayload(t *testing.T) {
 	collector, err := monitor.NewCollector()
 	if err != nil {
@@ -46,7 +58,7 @@ func TestDesktopBridgeGetState_ReturnsJSONPayload(t *testing.T) {
 		_ = collector.Stop()
 	}()
 
-	bridge := newDesktopBridge(collector, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(collector, nil, "both", newTestDesktopPreferencesController(), nil, nil)
 	raw, err := bridge.getState()
 	if err != nil {
 		t.Fatalf("getState returned error: %v", err)
@@ -81,7 +93,7 @@ func TestDesktopBridgeDeleteTeam_RemovesClaudeTeamArtifacts(t *testing.T) {
 		_ = collector.Stop()
 	}()
 
-	bridge := newDesktopBridge(collector, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(collector, newConfiguredAuthenticatedTestAuthManager(t), "both", newTestDesktopPreferencesController(), nil, nil)
 	result, err := bridge.deleteTeam(teamName)
 	if err != nil {
 		t.Fatalf("deleteTeam returned error: %v", err)
@@ -108,7 +120,7 @@ func TestDesktopBridgeGetContext_ReturnsDesktopMetadata(t *testing.T) {
 		_ = collector.Stop()
 	}()
 
-	bridge := newDesktopBridge(collector, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(collector, nil, "both", newTestDesktopPreferencesController(), nil, nil)
 	context := bridge.getContext()
 
 	if context["mode"] != "desktop" {
@@ -120,7 +132,7 @@ func TestDesktopBridgeGetContext_ReturnsDesktopMetadata(t *testing.T) {
 }
 
 func TestDesktopBridgePreferencesRoundTrip(t *testing.T) {
-	bridge := newDesktopBridge(nil, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(nil, newConfiguredAuthenticatedTestAuthManager(t), "both", newTestDesktopPreferencesController(), nil, nil)
 
 	prefs := bridge.getPreferences()
 	if prefs != defaultDesktopPreferences() {
@@ -148,7 +160,7 @@ func TestDesktopBridgePreferencesRoundTrip(t *testing.T) {
 }
 
 func TestDesktopBridgeOpenExternal_RejectsUnsupportedSchemes(t *testing.T) {
-	bridge := newDesktopBridge(nil, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(nil, nil, "both", newTestDesktopPreferencesController(), nil, nil)
 
 	if err := bridge.openExternal("file:///tmp/test"); err == nil {
 		t.Fatal("expected openExternal to reject non-http URL")
@@ -156,7 +168,7 @@ func TestDesktopBridgeOpenExternal_RejectsUnsupportedSchemes(t *testing.T) {
 }
 
 func TestDesktopBridgeNativeWindowActionsRequireNativeWindows(t *testing.T) {
-	bridge := newDesktopBridge(nil, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(nil, newConfiguredAuthenticatedTestAuthManager(t), "both", newTestDesktopPreferencesController(), nil, nil)
 
 	if err := bridge.openPreferencesWindow(); err == nil {
 		t.Fatal("expected openPreferencesWindow to fail without native window support")
@@ -168,7 +180,7 @@ func TestDesktopBridgeNativeWindowActionsRequireNativeWindows(t *testing.T) {
 
 func TestDesktopBridgeNavigateUsesViewNavigation(t *testing.T) {
 	view := &stubDesktopBridgeView{}
-	bridge := newDesktopBridge(nil, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(nil, nil, "both", newTestDesktopPreferencesController(), nil, nil)
 	bridge.view = view
 
 	if err := bridge.navigate("/game/"); err != nil {
@@ -185,7 +197,7 @@ func TestDesktopBridgeNavigateUsesViewNavigation(t *testing.T) {
 
 func TestDesktopBridgeRefreshViewReloadsPage(t *testing.T) {
 	view := &stubDesktopBridgeView{}
-	bridge := newDesktopBridge(nil, "both", newTestDesktopPreferencesController(), nil, nil)
+	bridge := newDesktopBridge(nil, nil, "both", newTestDesktopPreferencesController(), nil, nil)
 	bridge.view = view
 
 	bridge.refreshView()

@@ -401,13 +401,11 @@ func inspectOpenClawSessionLog(logPath string) (OpenClawSessionDiscovery, error)
 				})
 			}
 			if toolUse != "" {
-				text := toolUse
-				if toolDetail != "" {
-					text += " · " + toolDetail
-				}
+				text := normalizeToolEventText(toolUse, toolDetail)
+				kind, title := classifyToolCall(toolUse, toolDetail)
 				recentEvents = append(recentEvents, OpenClawSessionEvent{
-					Kind:      "tool",
-					Title:     "工具调用",
+					Kind:      kind,
+					Title:     title,
 					Text:      text,
 					Timestamp: ts,
 				})
@@ -415,9 +413,10 @@ func inspectOpenClawSessionLog(logPath string) (OpenClawSessionDiscovery, error)
 		case "toolresult", "tool":
 			text := extractOpenClawToolResultText(envelope.Message.Content)
 			if text != "" {
+				kind, title := classifyToolResult("", text)
 				recentEvents = append(recentEvents, OpenClawSessionEvent{
-					Kind:      "tool",
-					Title:     "工具结果",
+					Kind:      kind,
+					Title:     title,
 					Text:      text,
 					Timestamp: ts,
 				})
@@ -425,7 +424,7 @@ func inspectOpenClawSessionLog(logPath string) (OpenClawSessionDiscovery, error)
 		}
 	}
 
-	result.RecentEvents = dedupeOpenClawEvents(recentEvents, 10)
+	result.RecentEvents = dedupeOpenClawEvents(recentEvents, 24)
 	return result, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/liaoweijun/agent-team-monitor/pkg/api"
 	"github.com/liaoweijun/agent-team-monitor/pkg/monitor"
 )
 
@@ -126,6 +127,7 @@ window.setTimeout(window.__ATM_REPORT_DESKTOP_PATHNAME__, 0);
 
 type desktopBridge struct {
 	collector   *monitor.Collector
+	auth        *api.AuthManager
 	view        desktopBridgeView
 	provider    string
 	preferences *desktopPreferencesController
@@ -133,13 +135,14 @@ type desktopBridge struct {
 	windows     *desktopNativeWindows
 }
 
-func newDesktopBridge(collector *monitor.Collector, provider string, preferences *desktopPreferencesController, tray *desktopTray, windows *desktopNativeWindows) *desktopBridge {
+func newDesktopBridge(collector *monitor.Collector, auth *api.AuthManager, provider string, preferences *desktopPreferencesController, tray *desktopTray, windows *desktopNativeWindows) *desktopBridge {
 	if preferences == nil {
 		preferences = newDesktopPreferencesController(newInMemoryDesktopPreferencesStore(), tray, nil)
 	}
 
 	return &desktopBridge{
 		collector:   collector,
+		auth:        auth,
 		provider:    provider,
 		preferences: preferences,
 		tray:        tray,
@@ -160,6 +163,9 @@ func (b *desktopBridge) bind(w desktopBridgeView) error {
 	}
 	if err := w.Bind("atmDesktopDeleteTeam", b.deleteTeam); err != nil {
 		return fmt.Errorf("bind atmDesktopDeleteTeam: %w", err)
+	}
+	if err := w.Bind("atmDesktopSendAgentMessage", b.sendAgentMessage); err != nil {
+		return fmt.Errorf("bind atmDesktopSendAgentMessage: %w", err)
 	}
 	if err := w.Bind("atmDesktopGetContext", b.getContext); err != nil {
 		return fmt.Errorf("bind atmDesktopGetContext: %w", err)
@@ -214,9 +220,19 @@ func (b *desktopBridge) getState() (json.RawMessage, error) {
 	return json.RawMessage(payload), nil
 }
 
+func (b *desktopBridge) requireAdmin() error {
+	if b == nil || b.auth == nil {
+		return fmt.Errorf("admin login not configured")
+	}
+	return b.auth.RequireAuthenticated()
+}
+
 func (b *desktopBridge) deleteTeam(teamName string) (map[string]interface{}, error) {
 	if b == nil || b.collector == nil {
 		return nil, fmt.Errorf("desktop bridge collector unavailable")
+	}
+	if err := b.requireAdmin(); err != nil {
+		return nil, err
 	}
 
 	if err := b.collector.DeleteTeam(teamName); err != nil {
@@ -226,6 +242,24 @@ func (b *desktopBridge) deleteTeam(teamName string) (map[string]interface{}, err
 	return map[string]interface{}{
 		"status":  "ok",
 		"message": "Team deleted",
+	}, nil
+}
+
+func (b *desktopBridge) sendAgentMessage(teamName, agentName, text string) (map[string]interface{}, error) {
+	if b == nil || b.collector == nil {
+		return nil, fmt.Errorf("desktop bridge collector unavailable")
+	}
+	if err := b.requireAdmin(); err != nil {
+		return nil, err
+	}
+
+	if err := b.collector.SendAgentMessage(teamName, agentName, text); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"status":  "ok",
+		"message": "Message queued",
 	}, nil
 }
 
@@ -298,6 +332,9 @@ func (b *desktopBridge) getPreferences() desktopPreferences {
 func (b *desktopBridge) setPreferences(input desktopPreferences) (desktopPreferences, error) {
 	if b == nil || b.preferences == nil {
 		return defaultDesktopPreferences(), fmt.Errorf("desktop preferences unavailable")
+	}
+	if err := b.requireAdmin(); err != nil {
+		return defaultDesktopPreferences(), err
 	}
 
 	return b.preferences.Set(input)
@@ -374,6 +411,9 @@ func (b *desktopBridge) showWindow() error {
 func (b *desktopBridge) openPreferencesWindow() error {
 	if b == nil || b.windows == nil {
 		return fmt.Errorf("desktop native windows unavailable")
+	}
+	if err := b.requireAdmin(); err != nil {
+		return err
 	}
 
 	b.windows.showPreferences()

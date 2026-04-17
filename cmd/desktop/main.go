@@ -25,6 +25,10 @@ var (
 )
 
 func main() {
+	if err := agentapp.LoadEnvFromExecutableDir(); err != nil {
+		log.Fatalf("load .env from executable directory: %v", err)
+	}
+
 	flag.Parse()
 
 	if *version {
@@ -98,7 +102,7 @@ func main() {
 		nativeWindows.install()
 	}
 
-	bridge := newDesktopBridge(session.Collector, *provider, preferencesController, tray, nativeWindows)
+	bridge := newDesktopBridge(session.Collector, session.Auth, *provider, preferencesController, tray, nativeWindows)
 	if err := mainWindow.attachBridge(bridge); err != nil {
 		log.Fatalf("attach desktop bridge: %v", err)
 	}

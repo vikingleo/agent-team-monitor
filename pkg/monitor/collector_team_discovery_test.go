@@ -173,3 +173,99 @@ func TestMergeDiscoveredProjectTeams_SkipsLowConfidenceOrphanSession(t *testing.
 		t.Fatalf("expected existing team to remain unchanged, got lead session %s", merged[0].LeadSessionID)
 	}
 }
+
+func TestMergeStandaloneClaudeSessions_CreatesStandaloneTeam(t *testing.T) {
+	now := time.Now()
+	merged := mergeStandaloneClaudeSessions(nil, []parser.ClaudeSessionDiscovery{
+		{
+			PID:        10217,
+			SessionID:  "9a88def1-6ad3-4d32-a378-1dd0979cfd49",
+			Cwd:        "/home/test/work/demo",
+			StartedAt:  now.Add(-2 * time.Minute),
+			LastSeenAt: now,
+			Kind:       "interactive",
+			Entrypoint: "cli",
+		},
+	})
+
+	if len(merged) != 1 {
+		t.Fatalf("expected 1 team, got %d", len(merged))
+	}
+
+	team := merged[0]
+	if team.Name != "claude-demo" {
+		t.Fatalf("unexpected team name: %s", team.Name)
+	}
+	if team.LeadSessionID != "9a88def1-6ad3-4d32-a378-1dd0979cfd49" {
+		t.Fatalf("unexpected lead session id: %s", team.LeadSessionID)
+	}
+	if team.ProjectCwd != "/home/test/work/demo" {
+		t.Fatalf("unexpected project cwd: %s", team.ProjectCwd)
+	}
+	if len(team.Members) != 1 {
+		t.Fatalf("expected 1 member, got %d", len(team.Members))
+	}
+	if team.Members[0].Name != "team-lead" {
+		t.Fatalf("unexpected member name: %s", team.Members[0].Name)
+	}
+}
+
+func TestMergeStandaloneClaudeSessions_MergesIntoExistingTeamByLeadSession(t *testing.T) {
+	now := time.Now()
+	teams := []types.TeamInfo{
+		{
+			Name:          "existing-team",
+			LeadSessionID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			CreatedAt:     now.Add(-time.Hour),
+			Members:       []types.AgentInfo{},
+			Tasks:         []types.TaskInfo{},
+		},
+	}
+
+	merged := mergeStandaloneClaudeSessions(teams, []parser.ClaudeSessionDiscovery{
+		{
+			PID:        1,
+			SessionID:  "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			Cwd:        "/home/test/work/existing",
+			StartedAt:  now.Add(-5 * time.Minute),
+			LastSeenAt: now,
+		},
+	})
+
+	if len(merged) != 1 {
+		t.Fatalf("expected 1 team, got %d", len(merged))
+	}
+	if merged[0].ProjectCwd != "/home/test/work/existing" {
+		t.Fatalf("expected cwd backfilled, got %s", merged[0].ProjectCwd)
+	}
+	if len(merged[0].Members) != 1 {
+		t.Fatalf("expected team-lead merged, got %d members", len(merged[0].Members))
+	}
+}
+
+func TestMergeStandaloneClaudeSessions_KeepsMultipleSessionsInSameCwd(t *testing.T) {
+	now := time.Now()
+	merged := mergeStandaloneClaudeSessions(nil, []parser.ClaudeSessionDiscovery{
+		{
+			PID:        1,
+			SessionID:  "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			Cwd:        "/home/test/work/demo",
+			StartedAt:  now.Add(-5 * time.Minute),
+			LastSeenAt: now.Add(-4 * time.Minute),
+		},
+		{
+			PID:        2,
+			SessionID:  "ffffffff-1111-2222-3333-444444444444",
+			Cwd:        "/home/test/work/demo",
+			StartedAt:  now.Add(-3 * time.Minute),
+			LastSeenAt: now,
+		},
+	})
+
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 teams, got %d", len(merged))
+	}
+	if merged[0].LeadSessionID == merged[1].LeadSessionID {
+		t.Fatal("expected distinct lead sessions")
+	}
+}

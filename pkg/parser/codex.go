@@ -57,13 +57,19 @@ type codexResponsePayload struct {
 	Role      string                     `json:"role"`
 	Name      string                     `json:"name"`
 	Arguments string                     `json:"arguments"`
+	CallID    string                     `json:"call_id"`
+	Output    string                     `json:"output"`
 	Content   []codexResponseMessagePart `json:"content"`
 }
 
 type codexEventPayload struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-	Text    string `json:"text"`
+	Type             string `json:"type"`
+	Message          string `json:"message"`
+	Text             string `json:"text"`
+	CallID           string `json:"call_id"`
+	AggregatedOutput string `json:"aggregated_output"`
+	Stdout           string `json:"stdout"`
+	Stderr           string `json:"stderr"`
 }
 
 type codexTurnContextPayload struct {
@@ -194,7 +200,9 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 		count = codexSessionTailLines
 	}
 
-	recentEvents := make([]CodexSessionEvent, 0, 8)
+	recentEvents := make([]CodexSessionEvent, 0, 16)
+	pendingToolOutputIdx := make(map[string]int)
+	seenToolOutputCalls := make(map[string]struct{})
 
 	for k := 0; k < count; k++ {
 		idx := (ringIdx - 1 - k) % codexSessionTailLines
@@ -270,6 +278,33 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 						Timestamp: ts,
 					})
 				}
+			case "task_started":
+				recentEvents = append(recentEvents, CodexSessionEvent{
+					Kind:      "status",
+					Title:     "轮次开始",
+					Text:      "开始处理当前请求",
+					Timestamp: ts,
+				})
+			case "exec_command_end":
+				if payload.CallID != "" {
+					if _, ok := seenToolOutputCalls[payload.CallID]; ok {
+						continue
+					}
+				}
+				text := sanitizeCodexStructuredText(payload.AggregatedOutput)
+				if text == "" {
+					text = sanitizeCodexStructuredText(strings.TrimSpace(payload.Stdout + "\n" + payload.Stderr))
+				}
+				if text == "" {
+					continue
+				}
+				kind, title := classifyToolResult("exec_command", text)
+				recentEvents = append(recentEvents, CodexSessionEvent{
+					Kind:      kind,
+					Title:     title,
+					Text:      text,
+					Timestamp: ts,
+				})
 			}
 		case "response_item":
 			var payload codexResponsePayload
@@ -283,18 +318,40 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 			}
 
 			if payload.Type == "function_call" {
-				text := strings.TrimSpace(payload.Name)
 				detail := summarizeCodexToolArguments(payload.Arguments)
-				if detail != "" {
-					text = strings.TrimSpace(text + " · " + detail)
-				}
+				text := normalizeToolEventText(payload.Name, detail)
 				if text != "" {
+					kind, title := classifyToolCall(payload.Name, detail)
 					recentEvents = append(recentEvents, CodexSessionEvent{
-						Kind:      "tool",
-						Title:     "工具调用",
+						Kind:      kind,
+						Title:     title,
 						Text:      text,
 						Timestamp: ts,
 					})
+				}
+				if payload.CallID != "" {
+					if idx, ok := pendingToolOutputIdx[payload.CallID]; ok && idx >= 0 && idx < len(recentEvents) {
+						recentEvents[idx].Kind, recentEvents[idx].Title = classifyToolResult(payload.Name, recentEvents[idx].Text)
+						delete(pendingToolOutputIdx, payload.CallID)
+					}
+				}
+				continue
+			}
+
+			if payload.Type == "function_call_output" {
+				text := sanitizeCodexStructuredText(payload.Output)
+				if text != "" {
+					kind, title := classifyToolResult("", text)
+					recentEvents = append(recentEvents, CodexSessionEvent{
+						Kind:      kind,
+						Title:     title,
+						Text:      text,
+						Timestamp: ts,
+					})
+					if payload.CallID != "" {
+						pendingToolOutputIdx[payload.CallID] = len(recentEvents) - 1
+						seenToolOutputCalls[payload.CallID] = struct{}{}
+					}
 				}
 				continue
 			}
@@ -328,7 +385,7 @@ func inspectCodexSessionLog(logPath string) (CodexSessionDiscovery, error) {
 		}
 	}
 
-	result.RecentEvents = dedupeCodexEvents(recentEvents, 10)
+	result.RecentEvents = dedupeCodexEvents(recentEvents, 24)
 
 	return result, nil
 }

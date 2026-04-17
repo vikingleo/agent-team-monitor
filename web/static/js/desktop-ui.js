@@ -18,6 +18,7 @@ let desktopPreferencesCache = normalizePreferences(
         ? (DESKTOP_BRIDGE?.readInitialDesktopPreferences?.() || DEFAULT_PREFERENCES)
         : readWebPreferences()
 );
+let desktopAdminAccessEnabled = true;
 
 function normalizeProviderFilter(value) {
     switch (value) {
@@ -91,6 +92,10 @@ async function loadDesktopPreferences() {
 }
 
 async function saveDesktopPreferences(nextPrefs) {
+    if (!desktopAdminAccessEnabled) {
+        throw new Error('管理员登录后才能修改桌面设置');
+    }
+
     const normalized = normalizePreferences(nextPrefs);
 
     if (!IS_DESKTOP_MODE || !DESKTOP_BRIDGE) {
@@ -108,6 +113,32 @@ async function saveDesktopPreferences(nextPrefs) {
     }
 
     return { ...desktopPreferencesCache };
+}
+
+export function setDesktopAdminAccess(enabled) {
+    desktopAdminAccessEnabled = enabled !== false;
+
+    const settingsButton = document.getElementById('desktop-settings-button');
+    if (settingsButton) {
+        settingsButton.disabled = !desktopAdminAccessEnabled;
+        settingsButton.title = desktopAdminAccessEnabled ? '' : '管理员登录后才能修改设置';
+    }
+
+    [
+        'desktop-hide-idle-toggle',
+        'desktop-startup-view-select',
+        'desktop-provider-filter-select',
+        'desktop-notify-task-completion-toggle',
+        'desktop-notify-stale-agents-toggle',
+        'desktop-close-to-tray-toggle',
+        'desktop-launch-on-login-toggle',
+        'desktop-start-minimized-to-tray-toggle',
+    ].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.disabled = !desktopAdminAccessEnabled;
+        }
+    });
 }
 
 function currentDesktopView() {

@@ -83,6 +83,16 @@ func TestDiscoverOpenClawSessions(t *testing.T) {
 	if len(session.RecentEvents) == 0 {
 		t.Fatal("expected recent events")
 	}
+	foundToolResult := false
+	for _, event := range session.RecentEvents {
+		if event.Kind == "tool_result" && event.Title == "工具结果" {
+			foundToolResult = true
+			break
+		}
+	}
+	if !foundToolResult {
+		t.Fatalf("expected tool_result event, got %#v", session.RecentEvents)
+	}
 }
 
 func TestDiscoverOpenClawSessions_FiltersByAge(t *testing.T) {

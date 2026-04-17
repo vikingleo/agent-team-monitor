@@ -139,11 +139,106 @@ func TestParseAgentActivity_HandlesLongAssistantLine(t *testing.T) {
 	if activity.LastToolUse != "Read" {
 		t.Fatalf("unexpected tool use: got %s", activity.LastToolUse)
 	}
-	if activity.LastThinking == "" {
-		t.Fatalf("expected non-empty thinking")
+	if activity.LastResponse == "" {
+		t.Fatalf("expected non-empty response")
 	}
-	if len(activity.LastThinking) > 153 {
-		t.Fatalf("expected thinking to be truncated, got len=%d", len(activity.LastThinking))
+	if activity.LastThinking != "" {
+		t.Fatalf("expected structured thinking to stay empty when log only contains text")
+	}
+}
+
+func TestParseAgentActivity_ClassifiesTerminalAndToolResultEvents(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "agent-terminal-activity.jsonl")
+
+	mustWriteJSONL(t, logPath, []any{
+		logEntry("assistant", "2026-04-10T09:10:00Z", "aa1234", "session-1", "/workspace/project",
+			map[string]any{
+				"role": "assistant",
+				"content": []any{
+					map[string]any{
+						"type": "tool_use",
+						"id":   "call-bash-1",
+						"name": "Bash",
+						"input": map[string]any{
+							"command": "git status --short",
+						},
+					},
+				},
+			}),
+		logEntry("user", "2026-04-10T09:10:01Z", "aa1234", "session-1", "/workspace/project",
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":        "tool_result",
+						"tool_use_id": "call-bash-1",
+						"content":     " M web/static/js/app.js",
+					},
+				},
+			}),
+		logEntry("assistant", "2026-04-10T09:10:02Z", "aa1234", "session-1", "/workspace/project",
+			map[string]any{
+				"role": "assistant",
+				"content": []any{
+					map[string]any{"type": "text", "text": "状态已确认。"},
+				},
+			}),
+	})
+
+	activity, err := ParseAgentActivity(logPath)
+	if err != nil {
+		t.Fatalf("ParseAgentActivity returned error: %v", err)
+	}
+	if activity == nil {
+		t.Fatalf("ParseAgentActivity returned nil activity")
+	}
+
+	foundTerminal := false
+	foundTerminalOutput := false
+	for _, event := range activity.RecentEvents {
+		if event.Kind == "terminal" && strings.Contains(event.Text, "git status --short") {
+			foundTerminal = true
+		}
+		if event.Kind == "terminal_output" && strings.Contains(event.Text, "web/static/js/app.js") {
+			foundTerminalOutput = true
+		}
+	}
+
+	if !foundTerminal {
+		t.Fatalf("expected terminal event, got %#v", activity.RecentEvents)
+	}
+	if !foundTerminalOutput {
+		t.Fatalf("expected terminal output event, got %#v", activity.RecentEvents)
+	}
+}
+
+func TestFindSessionTeamName(t *testing.T) {
+	projectsDir := t.TempDir()
+	sessionID := "4d6e964f-7291-4c89-9e58-c12dd3ded563"
+	logPath := filepath.Join(projectsDir, "project-a", sessionID+".jsonl")
+
+	mustWriteJSONL(t, logPath, []any{
+		map[string]any{
+			"type":      "assistant",
+			"timestamp": "2026-04-08T16:21:52Z",
+			"sessionId": sessionID,
+			"cwd":       "/home/test",
+		},
+		map[string]any{
+			"type":      "user",
+			"timestamp": "2026-04-08T16:21:57Z",
+			"sessionId": sessionID,
+			"teamName":  "default",
+			"cwd":       "/home/test",
+		},
+	})
+
+	teamName, err := FindSessionTeamName(projectsDir, sessionID)
+	if err != nil {
+		t.Fatalf("FindSessionTeamName returned error: %v", err)
+	}
+	if teamName != "default" {
+		t.Fatalf("unexpected team name: %q", teamName)
 	}
 }
 

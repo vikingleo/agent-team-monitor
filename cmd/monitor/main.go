@@ -23,6 +23,10 @@ var (
 const appName = "Agent Team Monitor"
 
 func main() {
+	if err := agentapp.LoadEnvFromExecutableDir(); err != nil {
+		log.Fatalf("Error loading .env from executable directory: %v", err)
+	}
+
 	flag.Parse()
 
 	if *version {

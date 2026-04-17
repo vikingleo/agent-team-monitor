@@ -29,12 +29,19 @@ type AssistantMessage struct {
 	Content json.RawMessage `json:"content"`
 }
 
-// ContentItem represents a single content item (text or tool_use)
+// ContentItem represents a single content item in a Claude activity record.
 type ContentItem struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-	Name string `json:"name,omitempty"` // For tool_use
-	ID   string `json:"id,omitempty"`   // For tool_use
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Name      string          `json:"name,omitempty"`        // For tool_use
+	ID        string          `json:"id,omitempty"`          // For tool_use
+	ToolUseID string          `json:"tool_use_id,omitempty"` // For tool_result
+	Input     json.RawMessage `json:"input,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	Error     json.RawMessage `json:"error,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 // AgentActivity represents parsed agent activity
@@ -70,9 +77,13 @@ type activityRecord struct {
 	Timestamp string          `json:"timestamp"`
 	AgentID   string          `json:"agentId"`
 	SessionID string          `json:"sessionId"`
+	TeamName  string          `json:"teamName"`
 	Cwd       string          `json:"cwd"`
 	Message   json.RawMessage `json:"message"`
 }
+
+const activityLogTailLines = 200
+const activityLogEventLimit = 24
 
 // ParseAgentActivity parses the agent's jsonl log file and extracts recent activity
 func ParseAgentActivity(logPath string) (*AgentActivity, error) {
@@ -89,7 +100,7 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 	scanner := newLargeScanner(file)
 
 	// Use a ring buffer to keep only the last N lines in memory
-	const tailSize = 50
+	const tailSize = activityLogTailLines
 	ring := make([]string, tailSize)
 	ringIdx := 0
 	totalLines := 0
@@ -109,7 +120,8 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 		count = tailSize
 	}
 
-	recentEvents := make([]AgentActivityEvent, 0, 8)
+	recentEvents := make([]AgentActivityEvent, 0, activityLogEventLimit)
+	pendingToolResults := make(map[string]int)
 
 	// Process lines in reverse to get most recent activity first
 	for k := 0; k < count; k++ {
@@ -134,8 +146,8 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 			activity.LastActiveTime = timestamp
 		}
 
-		// Only process assistant messages
-		if entry.Type != "assistant" {
+		// Only process assistant and user messages from activity logs.
+		if entry.Type != "assistant" && entry.Type != "user" {
 			continue
 		}
 
@@ -144,26 +156,22 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 			continue
 		}
 
-		// Parse content
-		var content []ContentItem
-		if err := json.Unmarshal(msg.Content, &content); err != nil {
-			// Try parsing as single object
-			var singleContent ContentItem
-			if err := json.Unmarshal(msg.Content, &singleContent); err != nil {
-				continue
-			}
-			content = []ContentItem{singleContent}
+		content := parseActivityContent(msg.Content)
+		if len(content) == 0 {
+			continue
 		}
 
 		// Extract thinking, tool use, and latest assistant response
 		for _, item := range content {
-			if item.Type == "text" && activity.LastThinking == "" {
-				text := normalizeActivitySummary(item.Text, 150)
+			text := extractActivityItemText(item)
+
+			if (item.Type == "thinking" || item.Type == "redacted_thinking") && activity.LastThinking == "" {
+				text := normalizeActivitySummary(text, 150)
 				activity.LastThinking = text
 			}
 
-			if item.Type == "text" && activity.LastResponse == "" {
-				activity.LastResponse = sanitizeStructuredText(item.Text)
+			if item.Type == "text" && entry.Type == "assistant" && activity.LastResponse == "" {
+				activity.LastResponse = sanitizeStructuredText(text)
 			}
 
 			if item.Type == "tool_use" && activity.LastToolUse == "" {
@@ -173,15 +181,15 @@ func ParseAgentActivity(logPath string) (*AgentActivity, error) {
 			}
 		}
 
-		recentEvents = append(recentEvents, extractActivityEvents(content, timestamp)...)
+		recentEvents = appendActivityEvents(recentEvents, entry.Type, content, entry.Message, timestamp, pendingToolResults)
 
-		// Stop if we have the core recent signals needed by the UI
-		if activity.LastThinking != "" && activity.LastToolUse != "" && activity.LastResponse != "" && len(recentEvents) >= 6 {
+		// Stop once we have enough recent signals for the UI.
+		if activity.LastToolUse != "" && activity.LastResponse != "" && len(recentEvents) >= activityLogEventLimit {
 			break
 		}
 	}
 
-	activity.RecentEvents = dedupeActivityEvents(recentEvents, 8)
+	activity.RecentEvents = dedupeActivityEvents(recentEvents, activityLogEventLimit)
 
 	return activity, nil
 }
@@ -215,35 +223,150 @@ func normalizeActivitySummary(text string, maxRunes int) string {
 	return normalized[:cut] + "..."
 }
 
-func extractActivityEvents(content []ContentItem, timestamp time.Time) []AgentActivityEvent {
-	events := make([]AgentActivityEvent, 0, len(content))
+func parseActivityContent(raw json.RawMessage) []ContentItem {
+	var content []ContentItem
+	if err := json.Unmarshal(raw, &content); err == nil {
+		return content
+	}
+
+	var singleContent ContentItem
+	if err := json.Unmarshal(raw, &singleContent); err == nil {
+		return []ContentItem{singleContent}
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return []ContentItem{{
+			Type: "text",
+			Text: text,
+		}}
+	}
+
+	return nil
+}
+
+func appendActivityEvents(events []AgentActivityEvent, recordType string, content []ContentItem, rawMessage json.RawMessage, timestamp time.Time, pendingToolResults map[string]int) []AgentActivityEvent {
 	for _, item := range content {
 		switch item.Type {
+		case "thinking", "redacted_thinking":
+			text := normalizeActivityText(extractActivityItemText(item))
+			if text == "" {
+				continue
+			}
+			events = append(events, AgentActivityEvent{
+				Kind:      "thinking",
+				Title:     "思考",
+				Text:      text,
+				Timestamp: timestamp,
+			})
 		case "text":
 			text := normalizeActivityText(item.Text)
 			if text == "" {
 				continue
 			}
+			kind := "response"
+			title := "输出"
+			if recordType == "user" {
+				kind = "task"
+				title = "用户指令"
+			}
 			events = append(events, AgentActivityEvent{
-				Kind:      "response",
-				Title:     "输出",
+				Kind:      kind,
+				Title:     title,
 				Text:      text,
 				Timestamp: timestamp,
 			})
 		case "tool_use":
-			detail := strings.TrimSpace(item.Name)
-			if detail == "" {
+			detail := extractToolDetail(item.Name, rawMessage)
+			text := normalizeToolEventText(item.Name, detail)
+			if text == "" {
 				continue
 			}
+			kind, title := classifyToolCall(item.Name, detail)
 			events = append(events, AgentActivityEvent{
-				Kind:      "tool",
-				Title:     "工具调用",
-				Text:      detail,
+				Kind:      kind,
+				Title:     title,
+				Text:      text,
 				Timestamp: timestamp,
 			})
+			if item.ID != "" {
+				if idx, ok := pendingToolResults[item.ID]; ok && idx >= 0 && idx < len(events) {
+					events[idx].Kind, events[idx].Title = classifyToolResult(item.Name, events[idx].Text)
+					delete(pendingToolResults, item.ID)
+				}
+			}
+		case "tool_result":
+			text := normalizeActivityText(extractActivityItemText(item))
+			if text == "" {
+				continue
+			}
+			kind, title := classifyToolResult(item.Name, text)
+			events = append(events, AgentActivityEvent{
+				Kind:      kind,
+				Title:     title,
+				Text:      text,
+				Timestamp: timestamp,
+			})
+			if item.ToolUseID != "" {
+				pendingToolResults[item.ToolUseID] = len(events) - 1
+			}
 		}
 	}
 	return events
+}
+
+func extractActivityItemText(item ContentItem) string {
+	if text := sanitizeStructuredText(item.Text); text != "" {
+		return text
+	}
+	for _, raw := range []json.RawMessage{item.Content, item.Output, item.Result, item.Error} {
+		if text := extractActivityContentText(raw); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func extractActivityContentText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return sanitizeStructuredText(strings.TrimSpace(string(raw)))
+	}
+	return extractActivityAnyText(value)
+}
+
+func extractActivityAnyText(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return sanitizeStructuredText(typed)
+	case []interface{}:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text := extractActivityAnyText(item)
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	case map[string]interface{}:
+		kind := strings.ToLower(strings.TrimSpace(toString(typed["type"])))
+		if kind == "tool_reference" {
+			if name := sanitizeStructuredText(toString(typed["tool_name"])); name != "" {
+				return name
+			}
+		}
+
+		for _, key := range []string{"text", "content", "output", "result", "error", "summary", "tool_name"} {
+			if text := sanitizeStructuredText(toString(typed[key])); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 func dedupeActivityEvents(events []AgentActivityEvent, limit int) []AgentActivityEvent {
@@ -741,6 +864,42 @@ func FindSessionCwd(projectsDir, sessionID string) (string, error) {
 	}
 
 	return "", nil
+}
+
+// FindSessionTeamName returns the most recent non-empty runtime teamName for a session.
+func FindSessionTeamName(projectsDir, sessionID string) (string, error) {
+	logPath, err := FindLeadSessionLogFile(projectsDir, sessionID)
+	if err != nil || logPath == "" {
+		return "", err
+	}
+
+	file, err := os.Open(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := newLargeScanner(file)
+	teamName := ""
+
+	for scanner.Scan() {
+		var record activityRecord
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			continue
+		}
+		if strings.TrimSpace(record.TeamName) != "" {
+			teamName = strings.TrimSpace(record.TeamName)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return teamName, nil
 }
 
 // FindAgentLogFile finds the agent's log file by matching agent ID (deprecated, use FindAgentLogFileByCwd)

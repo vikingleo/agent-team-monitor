@@ -1,10 +1,15 @@
-import { getDesktopPreferences, initDesktopUI, isDesktopMode, setDesktopPreferences } from './desktop-ui.js';
+import { getDesktopPreferences, initDesktopUI, isDesktopMode, setDesktopAdminAccess, setDesktopPreferences } from './desktop-ui.js';
 
 // API Configuration
 const API_BASE_URL = window.location.origin;
 const API_ENDPOINTS = {
     state: `${API_BASE_URL}/api/state`,
     teams: `${API_BASE_URL}/api/teams`,
+    managedTeams: `${API_BASE_URL}/api/managed/teams`,
+    agentMessage: `${API_BASE_URL}/api/agents/message`,
+    authStatus: `${API_BASE_URL}/api/auth/status`,
+    authLogin: `${API_BASE_URL}/api/auth/login`,
+    authLogout: `${API_BASE_URL}/api/auth/logout`,
     processes: `${API_BASE_URL}/api/processes`,
     health: `${API_BASE_URL}/api/health`
 };
@@ -21,11 +26,88 @@ let hideIdleAgents = true;
 const THEME_STORAGE_KEY = 'atm-dashboard-theme';
 const DEFAULT_THEME = 'light';
 const DASHBOARD_ACTIVE_WINDOW_MS = 20 * 60 * 1000;
+const TEAM_OVERVIEW_KEY = '__team__';
+const CONTROL_FEED_LIMIT = 48;
+const STATE_LABELS = {
+    working: '工作中',
+    busy: '忙碌中',
+    idle: '空闲',
+    completed: '已完成',
+    pending: '待处理',
+    in_progress: '进行中',
+    running: '运行中',
+    running_detached: '后台运行',
+    stopped: '已停止',
+    failed: '失败',
+    error: '异常',
+    paused: '已暂停',
+    waiting: '等待中',
+    created: '已创建',
+    starting: '启动中',
+    stopping: '停止中',
+    online: '在线',
+    offline: '离线',
+    detached: '已脱离',
+    unknown: '未知'
+};
+const ROLE_LABELS = {
+    lead: '主成员',
+    leader: '主成员',
+    primary: '主成员',
+    owner: '主成员',
+    main: '主成员',
+    agent: '成员',
+    member: '成员',
+    worker: '执行成员',
+    coder: '编码成员',
+    implementer: '实现成员',
+    planner: '规划成员',
+    reviewer: '评审成员',
+    researcher: '研究成员',
+    coordinator: '协调成员',
+    manager: '管理成员',
+    frontend: '前端',
+    backend: '后端',
+    fullstack: '全栈',
+    ui: '界面',
+    ux: '体验',
+    design: '设计',
+    qa: '测试',
+    tester: '测试',
+    ops: '运维',
+    devops: '运维',
+    infra: '基础设施',
+    infrastructure: '基础设施',
+    unknown: '未标注'
+};
 let activeAgentDetailKey = null;
 let dashboardScrollRoot = null;
 let scrollRAF = null;
+let latestManagedTeams = [];
+let selectedTeamName = null;
+let selectedAgentKey = null;
+let deferredTeamsRender = null;
+let controlComposerIsComposing = false;
+const controlComposerDrafts = {};
+const controlComposerFeedback = {};
+const controlComposerSubmitting = {};
+const pendingOperatorMessages = [];
+let adminAuthState = {
+    configured: false,
+    authenticated: false,
+};
+
+function isModalVisible(id) {
+    const modal = document.getElementById(id);
+    return Boolean(modal && modal.hidden === false);
+}
+
+function syncOverlayState() {
+    const shouldLock = Boolean(activeAgentDetailKey) || isModalVisible('auth-modal') || isModalVisible('managed-team-modal');
+    document.body.classList.toggle('agent-detail-open', shouldLock);
+}
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log('Agent Team Monitor initialized');
     if (IS_DESKTOP_MODE) {
         const prefs = getDesktopPreferences();
@@ -37,7 +119,11 @@ document.addEventListener('DOMContentLoaded', () => {
     initThemeSwitcher();
     initTabs();
     initViewFilters();
+    initManagedTeamControls();
+    initAuthControls();
+    initControlWorkspace();
     initAgentDetailModal();
+    await refreshAuthStatus();
     startAutoRefresh();
     fetchData();
     initDesktopUI({
@@ -58,7 +144,198 @@ document.addEventListener('DOMContentLoaded', () => {
             renderFilteredUI();
         }
     });
+    setDesktopAdminAccess(isAdminAuthenticated());
 });
+
+function isAdminAuthenticated() {
+    return adminAuthState.configured === true && adminAuthState.authenticated === true;
+}
+
+async function refreshAuthStatus() {
+    try {
+        const response = await fetch(API_ENDPOINTS.authStatus, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        adminAuthState = await response.json();
+    } catch (error) {
+        console.error('Failed to load auth status:', error);
+        adminAuthState = {
+            configured: false,
+            authenticated: false,
+        };
+    }
+
+    applyAdminAccessState();
+    return { ...adminAuthState };
+}
+
+function applyAdminAccessState() {
+    const indicator = document.getElementById('admin-auth-status');
+    const button = document.getElementById('admin-auth-button');
+
+    if (indicator) {
+        indicator.classList.remove('authenticated', 'unconfigured');
+        if (!adminAuthState.configured) {
+            indicator.textContent = '管理：未配置';
+            indicator.classList.add('unconfigured');
+        } else if (adminAuthState.authenticated) {
+            indicator.textContent = '管理：已登录';
+            indicator.classList.add('authenticated');
+        } else {
+            indicator.textContent = '管理：未登录';
+        }
+    }
+
+    if (button) {
+        if (!adminAuthState.configured) {
+            button.textContent = '未配置登录';
+            button.disabled = true;
+        } else if (adminAuthState.authenticated) {
+            button.textContent = '退出管理';
+            button.disabled = false;
+        } else {
+            button.textContent = '管理员登录';
+            button.disabled = false;
+        }
+    }
+
+    setDesktopAdminAccess(isAdminAuthenticated());
+
+    if (previousState) {
+        renderFilteredUI();
+    }
+}
+
+function initAuthControls() {
+    const authButton = document.getElementById('admin-auth-button');
+    const authModal = document.getElementById('auth-modal');
+    const authForm = document.getElementById('auth-login-form');
+    const authFeedback = document.getElementById('auth-feedback');
+    const authUsername = document.getElementById('auth-username');
+    const authPassword = document.getElementById('auth-password');
+    const authSubmitButton = document.getElementById('auth-submit-button');
+
+    if (authButton) {
+        authButton.addEventListener('click', async () => {
+            if (!adminAuthState.configured) {
+                return;
+            }
+
+            if (adminAuthState.authenticated) {
+                try {
+                    const response = await fetch(API_ENDPOINTS.authLogout, { method: 'POST' });
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    await refreshAuthStatus();
+                } catch (error) {
+                    console.error('Failed to logout admin:', error);
+                }
+                return;
+            }
+
+            if (authModal) {
+                authModal.hidden = false;
+                syncOverlayState();
+            }
+            if (authFeedback) {
+                authFeedback.textContent = '';
+            }
+            if (authUsername) {
+                authUsername.focus();
+            }
+        });
+    }
+
+    document.addEventListener('click', (event) => {
+        const closer = event.target.closest('[data-close-auth-modal]');
+        if (!closer) {
+            return;
+        }
+        closeAuthModal();
+    });
+
+    if (authForm) {
+        authForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!authUsername || !authPassword) {
+                return;
+            }
+
+            if (authSubmitButton) {
+                authSubmitButton.disabled = true;
+            }
+            if (authFeedback) {
+                authFeedback.textContent = '登录中...';
+            }
+
+            try {
+                const response = await fetch(API_ENDPOINTS.authLogin, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: authUsername.value.trim(),
+                        password: authPassword.value
+                    })
+                });
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(message.trim() || '登录失败');
+                }
+
+                closeAuthModal();
+                authPassword.value = '';
+                await refreshAuthStatus();
+            } catch (error) {
+                if (authFeedback) {
+                    authFeedback.textContent = `登录失败: ${error.message}`;
+                }
+            } finally {
+                if (authSubmitButton) {
+                    authSubmitButton.disabled = false;
+                }
+            }
+        });
+    }
+}
+
+function closeAuthModal() {
+    const authModal = document.getElementById('auth-modal');
+    if (authModal) {
+        authModal.hidden = true;
+    }
+    syncOverlayState();
+}
+
+function openManagedTeamModal() {
+    const modal = document.getElementById('managed-team-modal');
+    const nameInput = document.getElementById('managed-team-name');
+    const feedback = document.getElementById('managed-team-feedback');
+    if (!modal) {
+        return;
+    }
+
+    modal.hidden = false;
+    if (feedback) {
+        feedback.textContent = '';
+    }
+    syncOverlayState();
+
+    if (nameInput instanceof HTMLInputElement) {
+        window.setTimeout(() => nameInput.focus(), 0);
+    }
+}
+
+function closeManagedTeamModal() {
+    const modal = document.getElementById('managed-team-modal');
+    if (modal) {
+        modal.hidden = true;
+    }
+    syncOverlayState();
+}
 
 function initThemeSwitcher() {
     const buttons = document.querySelectorAll('[data-theme-choice]');
@@ -295,6 +572,154 @@ function switchTab(tabName) {
     document.getElementById(`${tabName}-tab`).classList.add('active');
 }
 
+function initControlWorkspace() {
+    document.addEventListener('click', (event) => {
+        const selector = event.target.closest('[data-control-select]');
+        if (!selector) {
+            return;
+        }
+
+        selectedTeamName = selector.getAttribute('data-control-team-name') || null;
+        const scope = selector.getAttribute('data-control-scope') || 'team';
+        selectedAgentKey = scope === 'agent'
+            ? (selector.getAttribute('data-control-agent-key') || TEAM_OVERVIEW_KEY)
+            : TEAM_OVERVIEW_KEY;
+        rerenderControlWorkspace();
+    });
+
+    document.addEventListener('input', (event) => {
+        const textarea = event.target.closest('[data-control-composer-input]');
+        if (!(textarea instanceof HTMLTextAreaElement)) {
+            return;
+        }
+
+        const selectionKey = textarea.getAttribute('data-control-selection-key') || '';
+        if (!selectionKey) {
+            return;
+        }
+
+        controlComposerDrafts[selectionKey] = textarea.value;
+        controlComposerFeedback[selectionKey] = '';
+    });
+
+    document.addEventListener('compositionstart', (event) => {
+        const textarea = event.target.closest('[data-control-composer-input]');
+        if (!(textarea instanceof HTMLTextAreaElement)) {
+            return;
+        }
+
+        controlComposerIsComposing = true;
+    });
+
+    document.addEventListener('compositionend', (event) => {
+        const textarea = event.target.closest('[data-control-composer-input]');
+        if (!(textarea instanceof HTMLTextAreaElement)) {
+            return;
+        }
+
+        const selectionKey = textarea.getAttribute('data-control-selection-key') || '';
+        if (selectionKey) {
+            controlComposerDrafts[selectionKey] = textarea.value;
+        }
+        controlComposerIsComposing = false;
+        flushDeferredControlPanelRender();
+    });
+
+    document.addEventListener('keydown', (event) => {
+        const textarea = event.target.closest('[data-control-composer-input]');
+        if (!(textarea instanceof HTMLTextAreaElement)) {
+            return;
+        }
+
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !controlComposerIsComposing) {
+            event.preventDefault();
+            textarea.closest('[data-control-composer-form]')?.requestSubmit();
+        }
+    });
+
+    document.addEventListener('submit', async (event) => {
+        const form = event.target.closest('[data-control-composer-form]');
+        if (!form) {
+            return;
+        }
+
+        event.preventDefault();
+        await submitControlComposer(form);
+    });
+}
+
+function rerenderControlWorkspace() {
+    if (!previousState) {
+        return;
+    }
+
+    updateTeams(previousState.teams || []);
+}
+
+function flushDeferredControlPanelRender() {
+    if (!deferredTeamsRender) {
+        return;
+    }
+
+    const nextTeams = deferredTeamsRender;
+    deferredTeamsRender = null;
+    updateTeams(nextTeams);
+}
+
+function shouldDeferControlPanelRender() {
+    const activeElement = document.activeElement;
+    return controlComposerIsComposing &&
+        activeElement instanceof HTMLTextAreaElement &&
+        activeElement.matches('[data-control-composer-input]');
+}
+
+function captureControlComposerState() {
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLTextAreaElement) || !activeElement.matches('[data-control-composer-input]')) {
+        return null;
+    }
+
+    const selectionKey = activeElement.getAttribute('data-control-selection-key') || '';
+    if (selectionKey) {
+        controlComposerDrafts[selectionKey] = activeElement.value;
+    }
+
+    return {
+        selectionKey,
+        selectionStart: activeElement.selectionStart,
+        selectionEnd: activeElement.selectionEnd,
+        scrollTop: activeElement.scrollTop,
+    };
+}
+
+function selectorEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+        return window.CSS.escape(value);
+    }
+
+    return String(value || '').replace(/["\\]/g, '\\$&');
+}
+
+function restoreControlComposerState(snapshot) {
+    if (!snapshot || !snapshot.selectionKey) {
+        return;
+    }
+
+    window.requestAnimationFrame(() => {
+        const textarea = document.querySelector(
+            `[data-control-composer-input][data-control-selection-key="${selectorEscape(snapshot.selectionKey)}"]`
+        );
+        if (!(textarea instanceof HTMLTextAreaElement)) {
+            return;
+        }
+
+        textarea.focus({ preventScroll: true });
+        textarea.selectionStart = snapshot.selectionStart;
+        textarea.selectionEnd = snapshot.selectionEnd;
+        textarea.scrollTop = snapshot.scrollTop;
+    });
+}
+
 // Auto-refresh
 function startAutoRefresh() {
     if (IS_DESKTOP_MODE && DESKTOP_BRIDGE) {
@@ -320,23 +745,38 @@ function stopAutoRefresh() {
 async function fetchData() {
     try {
         let data;
+        let managedTeams = [];
 
         if (IS_DESKTOP_MODE && DESKTOP_BRIDGE) {
             data = await DESKTOP_BRIDGE.fetchDesktopState();
-        } else {
-            const response = await fetch(`${API_ENDPOINTS.state}?_ts=${Date.now()}`, {
-                cache: 'no-store',
-                headers: {
-                    'Cache-Control': 'no-cache'
-                }
+            const managedResponse = await fetch(`${API_ENDPOINTS.managedTeams}?_ts=${Date.now()}`, {
+                cache: 'no-store'
             });
+            if (managedResponse.ok) {
+                managedTeams = await managedResponse.json();
+            }
+        } else {
+            const [response, managedResponse] = await Promise.all([
+                fetch(`${API_ENDPOINTS.state}?_ts=${Date.now()}`, {
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache'
+                    }
+                }),
+                fetch(`${API_ENDPOINTS.managedTeams}?_ts=${Date.now()}`, {
+                    cache: 'no-store'
+                })
+            ]);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             data = await response.json();
+            if (managedResponse.ok) {
+                managedTeams = await managedResponse.json();
+            }
         }
 
-        updateUI(data);
+        updateUI(data, managedTeams);
         updateConnectionStatus(true);
     } catch (error) {
         console.error('Error fetching data:', error);
@@ -345,8 +785,9 @@ async function fetchData() {
 }
 
 // Update UI with new data (智能更新，只更新变化的部分)
-function updateUI(data) {
+function updateUI(data, managedTeams = []) {
     latestRawState = data;
+    latestManagedTeams = Array.isArray(managedTeams) ? managedTeams : [];
     renderFilteredUI();
 }
 
@@ -400,6 +841,7 @@ function renderFilteredUI() {
         return;
     }
 
+    updateManagedTeams(latestManagedTeams);
     updateProviderFilterStats(latestRawState);
 
     const filtered = buildFilteredState(latestRawState);
@@ -416,6 +858,450 @@ function renderFilteredUI() {
     }
 
     previousState = filtered;
+}
+
+function initManagedTeamControls() {
+    const form = document.getElementById('managed-team-form');
+    const openButton = document.getElementById('managed-team-open-modal');
+    if (!form) {
+        return;
+    }
+
+    if (openButton) {
+        openButton.addEventListener('click', () => {
+            if (!isAdminAuthenticated()) {
+                setManagedTeamFeedback('管理员登录后才能创建团队');
+                return;
+            }
+            openManagedTeamModal();
+        });
+    }
+
+    document.addEventListener('click', (event) => {
+        const closer = event.target.closest('[data-close-managed-team-modal]');
+        if (!closer) {
+            return;
+        }
+        closeManagedTeamModal();
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') {
+            return;
+        }
+        if (isModalVisible('managed-team-modal')) {
+            closeManagedTeamModal();
+        }
+    });
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!isAdminAuthenticated()) {
+            setManagedTeamFeedback('管理员登录后才能创建团队');
+            return;
+        }
+
+        const nameInput = document.getElementById('managed-team-name');
+        const workspaceInput = document.getElementById('managed-team-workspace');
+        const modelInput = document.getElementById('managed-team-model');
+        const permissionSelect = document.getElementById('managed-team-permission');
+        const autostartToggle = document.getElementById('managed-team-autostart');
+        const initialTaskInput = document.getElementById('managed-team-initial-task');
+        const submitButton = document.getElementById('managed-team-submit');
+
+        if (!nameInput || !workspaceInput) {
+            return;
+        }
+
+        submitButton.disabled = true;
+        setManagedTeamFeedback('创建中...');
+
+        try {
+            const response = await fetch(API_ENDPOINTS.managedTeams, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: nameInput.value.trim(),
+                    provider: 'claude',
+                    workspace: workspaceInput.value.trim(),
+                    model: modelInput ? modelInput.value.trim() : '',
+                    permission: permissionSelect ? permissionSelect.value : ''
+                })
+            });
+            if (!response.ok) {
+                const message = await response.text();
+                throw new Error(message.trim() || '创建失败');
+            }
+
+            const created = await response.json();
+
+            if (autostartToggle && autostartToggle.checked && created?.id) {
+                const startResponse = await fetch(`${API_ENDPOINTS.managedTeams}/${encodeURIComponent(created.id)}/start`, {
+                    method: 'POST'
+                });
+                if (!startResponse.ok) {
+                    const message = await startResponse.text();
+                    throw new Error(message.trim() || '启动失败');
+                }
+
+                const initialTask = initialTaskInput ? initialTaskInput.value.trim() : '';
+                if (initialTask) {
+                    const messageResponse = await fetch(`${API_ENDPOINTS.managedTeams}/${encodeURIComponent(created.id)}/message`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ text: initialTask })
+                    });
+                    if (!messageResponse.ok) {
+                        const message = await messageResponse.text();
+                        throw new Error(message.trim() || '首条任务发送失败');
+                    }
+                }
+            }
+
+            nameInput.value = '';
+            workspaceInput.value = '';
+            if (modelInput) {
+                modelInput.value = '';
+            }
+            if (permissionSelect) {
+                permissionSelect.value = '';
+            }
+            if (initialTaskInput) {
+                initialTaskInput.value = '';
+            }
+            setManagedTeamFeedback('团队已创建' + (autostartToggle && autostartToggle.checked ? '并启动' : ''));
+            closeManagedTeamModal();
+            await fetchData();
+        } catch (error) {
+            setManagedTeamFeedback(`创建失败: ${error.message}`);
+        } finally {
+            submitButton.disabled = false;
+        }
+    });
+
+    document.addEventListener('click', async (event) => {
+        const actionButton = event.target.closest('[data-managed-action]');
+        if (!actionButton) {
+            return;
+        }
+        if (!isAdminAuthenticated()) {
+            setManagedTeamFeedback('管理员登录后才能管理自托管团队');
+            return;
+        }
+
+        const teamID = actionButton.getAttribute('data-managed-team-id');
+        const agentID = actionButton.getAttribute('data-managed-agent-id') || '';
+        const action = actionButton.getAttribute('data-managed-action');
+        const label = actionButton.getAttribute('data-managed-label') || '受管会话';
+        const feedbackNode = actionButton.closest('[data-managed-feedback-scope]')?.querySelector('[data-managed-feedback]') || null;
+        if (!teamID || !action) {
+            return;
+        }
+
+        const actionText = formatManagedActionText(action);
+        const endpoint = agentID
+            ? `${API_ENDPOINTS.managedTeams}/${encodeURIComponent(teamID)}/agents/${encodeURIComponent(agentID)}/${action}`
+            : `${API_ENDPOINTS.managedTeams}/${encodeURIComponent(teamID)}/${action}`;
+        actionButton.disabled = true;
+        setManagedActionFeedback(feedbackNode, `${label} ${actionText}中...`);
+        try {
+            const response = await fetch(endpoint, { method: 'POST' });
+            if (!response.ok) {
+                const message = await response.text();
+                throw new Error(message.trim() || `${action} 失败`);
+            }
+            setManagedActionFeedback(feedbackNode, `${label} 已${actionText}`);
+            await fetchData();
+        } catch (error) {
+            setManagedActionFeedback(feedbackNode, `${label} ${actionText}失败: ${error.message}`);
+        } finally {
+            actionButton.disabled = false;
+        }
+    });
+
+    document.addEventListener('submit', async (event) => {
+        const messageForm = event.target.closest('[data-managed-message-form]');
+        if (!messageForm) {
+            return;
+        }
+        event.preventDefault();
+        if (!isAdminAuthenticated()) {
+            setManagedTeamFeedback('管理员登录后才能下发任务');
+            return;
+        }
+
+        const teamID = messageForm.getAttribute('data-managed-team-id');
+        const agentID = messageForm.getAttribute('data-managed-agent-id');
+        const textarea = messageForm.querySelector('textarea[name="managed-team-message"]');
+        const submitButton = messageForm.querySelector('button[type="submit"]');
+        const text = textarea ? textarea.value.trim() : '';
+        if (!teamID || !text) {
+            return;
+        }
+
+        submitButton.disabled = true;
+        try {
+            const response = await fetch(`${API_ENDPOINTS.managedTeams}/${encodeURIComponent(teamID)}/message`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ text, agent_id: agentID || undefined })
+            });
+            if (!response.ok) {
+                const message = await response.text();
+                throw new Error(message.trim() || '发送失败');
+            }
+            textarea.value = '';
+            setManagedTeamFeedback('首条任务已写入受管会话');
+            await fetchData();
+        } catch (error) {
+            setManagedTeamFeedback(`发送失败: ${error.message}`);
+        } finally {
+            submitButton.disabled = false;
+        }
+    });
+}
+
+function setManagedTeamFeedback(message) {
+    const feedback = document.getElementById('managed-team-feedback');
+    if (feedback) {
+        feedback.textContent = message || '';
+    }
+}
+
+function setManagedActionFeedback(feedbackNode, message) {
+    if (feedbackNode) {
+        feedbackNode.textContent = message || '';
+    }
+    setManagedTeamFeedback(message);
+}
+
+async function sendAgentMessageRequest({ teamName = '', agentName = '', transport = '', managedTeamID = '', managedAgentID = '', text = '' }) {
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) {
+        throw new Error('请输入消息');
+    }
+
+    if (transport === 'managed_pty' && managedTeamID) {
+        const response = await fetch(`${API_ENDPOINTS.managedTeams}/${encodeURIComponent(managedTeamID)}/message`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ text: normalizedText, agent_id: managedAgentID || undefined })
+        });
+        if (!response.ok) {
+            const message = (await response.text()) || '发送失败';
+            throw new Error(message.trim());
+        }
+
+    return {
+        confirmation: managedAgentID ? '已写入受管成员会话' : '已写入受管主成员会话'
+    };
+}
+
+    if (!agentName) {
+        throw new Error('当前团队视图不支持直接发送，请先选择一个具体成员');
+    }
+
+    if (IS_DESKTOP_MODE && DESKTOP_BRIDGE?.sendDesktopAgentMessage) {
+        await DESKTOP_BRIDGE.sendDesktopAgentMessage(teamName, agentName, normalizedText);
+        return {
+            confirmation: '已写入成员收件箱，等待成员读取'
+        };
+    }
+
+    const response = await fetch(API_ENDPOINTS.agentMessage, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            team_name: teamName,
+            agent_name: agentName,
+            text: normalizedText
+        })
+    });
+
+    if (!response.ok) {
+        const message = (await response.text()) || '发送失败';
+        throw new Error(message.trim());
+    }
+
+    return {
+        confirmation: '已写入成员收件箱，等待成员读取'
+    };
+}
+
+function updateManagedTeams(teams) {
+    const openButton = document.getElementById('managed-team-open-modal');
+    const submitButton = document.getElementById('managed-team-submit');
+    const nameInput = document.getElementById('managed-team-name');
+    const workspaceInput = document.getElementById('managed-team-workspace');
+    const modelInput = document.getElementById('managed-team-model');
+    const permissionSelect = document.getElementById('managed-team-permission');
+    const autostartToggle = document.getElementById('managed-team-autostart');
+    const initialTaskInput = document.getElementById('managed-team-initial-task');
+    const controlsEnabled = isAdminAuthenticated();
+
+    [openButton, submitButton, nameInput, workspaceInput, modelInput, permissionSelect, autostartToggle, initialTaskInput].forEach((element) => {
+        if (element) {
+            element.disabled = !controlsEnabled;
+        }
+    });
+}
+
+function renderManagedTeamCard(item) {
+    const spec = item.spec || {};
+    const run = item.run || null;
+    const status = String((run && run.status) || 'stopped');
+    const statusLabel = formatManagedRunStatus(status);
+    const running = status === 'running' || status === 'running_detached';
+    const controllable = Boolean(run && run.controllable);
+    const disabled = !isAdminAuthenticated();
+    const workspace = spec.workspace || '';
+    const model = (spec.agents && spec.agents[0] && spec.agents[0].model) || '';
+
+    return `
+        <div class="team-card managed-team-card">
+            <div class="team-header">
+                <div class="team-header-left">
+                    <div class="team-name">${escapeHtml(spec.name || spec.id || '未命名团队')} <span class="agent-type">[受管]</span></div>
+                    <div class="team-created">标识：${escapeHtml(spec.id || '')}</div>
+                    ${workspace ? `<div class="team-cwd">工作目录: ${escapeHtml(workspace)}</div>` : ''}
+                    ${model ? `<div class="team-created">模型: ${escapeHtml(model)}</div>` : ''}
+                </div>
+                <div class="managed-team-actions">
+                    <button class="team-delete-btn" type="button" data-managed-action="start" data-managed-team-id="${escapeHtml(spec.id || '')}" ${running || disabled ? 'disabled' : ''}>启动</button>
+                    <button class="team-delete-btn" type="button" data-managed-action="stop" data-managed-team-id="${escapeHtml(spec.id || '')}" ${!running || !controllable || disabled ? 'disabled' : ''}>停止</button>
+                </div>
+            </div>
+            <div class="team-summary-bar">
+                <div class="team-summary-item">
+                    <span class="team-summary-label">状态</span>
+                    <span class="team-summary-value">${escapeHtml(statusLabel)}</span>
+                </div>
+                <div class="team-summary-item">
+                    <span class="team-summary-label">进程</span>
+                    <span class="team-summary-value">${escapeHtml(String((run && run.pid) || '-'))}</span>
+                </div>
+                <div class="team-summary-item">
+                    <span class="team-summary-label">可控</span>
+                    <span class="team-summary-value">${controllable ? '是' : '否'}</span>
+                </div>
+            </div>
+            <form class="managed-message-form" data-managed-message-form="true" data-managed-team-id="${escapeHtml(spec.id || '')}">
+                <textarea name="managed-team-message" class="agent-command-input" rows="3" placeholder="给受管主成员下发首条任务" ${!running || !controllable || disabled ? 'disabled' : ''}></textarea>
+                <div class="agent-command-actions">
+                    <button type="submit" class="agent-command-submit" ${!running || !controllable || disabled ? 'disabled' : ''}>下发任务</button>
+                    <span class="agent-command-feedback">${run && run.last_error ? escapeHtml(run.last_error) : ''}</span>
+                </div>
+            </form>
+        </div>
+    `;
+}
+
+function isManagedAgent(team, agent) {
+    return Boolean(team?.managed && normalizeLookupToken(team?.managed_team_id) && normalizeLookupToken(agent?.agent_id));
+}
+
+function isManagedAgentControllable(agent) {
+    return String(agent?.command_transport || '') === 'managed_pty';
+}
+
+function isManagedAgentRunning(agent) {
+    return String(agent?.status || '').toLowerCase() === 'working';
+}
+
+function countManagedRunningMembers(members) {
+    return (Array.isArray(members) ? members : []).filter(member => isManagedAgentRunning(member)).length;
+}
+
+function countManagedControllableMembers(members) {
+    return (Array.isArray(members) ? members : []).filter(member => isManagedAgentControllable(member)).length;
+}
+
+function describeManagedAgentControlState(agent) {
+    if (isManagedAgentControllable(agent)) {
+        return '会话在线，可直接停止或发消息';
+    }
+
+    if (isManagedAgentRunning(agent)) {
+        return '会话在线，但当前控制进程不可用';
+    }
+
+    const reason = normalizeMultilineText(agent?.command_reason || '');
+    if (reason.includes('尚未启动')) {
+        return '会话未启动，可单独启动';
+    }
+    if (reason && !reason.includes('已停止或已脱离当前控制进程')) {
+        return reason;
+    }
+
+    return '会话已停止，可单独启动';
+}
+
+function managedAgentControlTone(agent) {
+    if (isManagedAgentControllable(agent)) {
+        return 'controllable';
+    }
+    if (isManagedAgentRunning(agent)) {
+        return 'detached';
+    }
+    return 'stopped';
+}
+
+function formatManagedActionText(action) {
+    switch (String(action || '').toLowerCase()) {
+        case 'start':
+            return '启动';
+        case 'stop':
+            return '停止';
+        case 'message':
+            return '发送';
+        default:
+            return action || '操作';
+    }
+}
+
+function renderManagedAgentActionButtons(team, agent, controlsEnabled) {
+    const teamID = team?.managed_team_id || '';
+    const agentID = agent?.agent_id || '';
+    const running = isManagedAgentRunning(agent);
+    const controllable = isManagedAgentControllable(agent);
+
+    return `
+        <div class="managed-team-actions">
+            <button class="team-delete-btn start" type="button" data-managed-action="start" data-managed-team-id="${escapeHtml(teamID)}" data-managed-agent-id="${escapeHtml(agentID)}" data-managed-label="${escapeHtml(team?.name || '受管团队')} / ${escapeHtml(agent?.name || agentID || '成员')}" ${!controlsEnabled || !teamID || !agentID || running ? 'disabled' : ''}>启动</button>
+            <button class="team-delete-btn stop" type="button" data-managed-action="stop" data-managed-team-id="${escapeHtml(teamID)}" data-managed-agent-id="${escapeHtml(agentID)}" data-managed-label="${escapeHtml(team?.name || '受管团队')} / ${escapeHtml(agent?.name || agentID || '成员')}" ${!controlsEnabled || !teamID || !agentID || !controllable ? 'disabled' : ''}>停止</button>
+        </div>
+    `;
+}
+
+function renderTeamActions(team, provider, canDelete) {
+    if (team && team.managed) {
+        const members = Array.isArray(team.members) ? team.members : [];
+        const runningCount = countManagedRunningMembers(members);
+        const controllableCount = countManagedControllableMembers(members);
+        const disabled = !isAdminAuthenticated();
+        return `
+            <div class="managed-team-actions">
+                <button class="team-delete-btn start" type="button" data-managed-action="start" data-managed-team-id="${escapeHtml(team.managed_team_id || '')}" data-managed-label="${escapeHtml(team.name || '受管团队')} 全部成员" ${members.length === 0 || runningCount >= members.length || disabled ? 'disabled' : ''}>全部启动</button>
+                <button class="team-delete-btn stop" type="button" data-managed-action="stop" data-managed-team-id="${escapeHtml(team.managed_team_id || '')}" data-managed-label="${escapeHtml(team.name || '受管团队')} 全部成员" ${controllableCount === 0 || disabled ? 'disabled' : ''}>全部停止</button>
+            </div>
+        `;
+    }
+
+    if (canDelete) {
+        return `<button class="team-delete-btn danger" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c0 1 2 1 2 2v2"/></svg> 清理</button>`;
+    }
+
+    return '';
 }
 
 function buildFilteredState(rawState) {
@@ -475,17 +1361,17 @@ function updateProviderFilterStats(rawState) {
 
     const claudeCount = document.getElementById('claude-filter-count');
     if (claudeCount) {
-        claudeCount.textContent = `(team:${counts.claude.teams},agent:${counts.claude.agents})`;
+        claudeCount.textContent = `(团队:${counts.claude.teams},成员:${counts.claude.agents})`;
     }
 
     const codexCount = document.getElementById('codex-filter-count');
     if (codexCount) {
-        codexCount.textContent = `(team:${counts.codex.teams},agent:${counts.codex.agents})`;
+        codexCount.textContent = `(团队:${counts.codex.teams},成员:${counts.codex.agents})`;
     }
 
     const openClawCount = document.getElementById('openclaw-filter-count');
     if (openClawCount) {
-        openClawCount.textContent = `(team:${counts.openclaw.teams},agent:${counts.openclaw.agents})`;
+        openClawCount.textContent = `(团队:${counts.openclaw.teams},成员:${counts.openclaw.agents})`;
     }
 }
 
@@ -635,6 +1521,53 @@ function detectProcessProvider(process) {
     return 'unknown';
 }
 
+function providerDisplayName(provider) {
+    switch (String(provider || '').toLowerCase()) {
+        case 'claude': return 'Claude';
+        case 'codex': return 'Codex';
+        case 'openclaw': return 'OpenClaw';
+        default: return '团队';
+    }
+}
+
+function containsChineseText(value) {
+    return /[\u4e00-\u9fff]/.test(String(value || ''));
+}
+
+function formatMappedLabel(value, dictionary, fallback = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return fallback;
+    }
+
+    if (containsChineseText(normalized)) {
+        return normalized;
+    }
+
+    const key = normalized.toLowerCase();
+    if (dictionary[key]) {
+        return dictionary[key];
+    }
+
+    const tokens = key.split(/[_\-\s/]+/).filter(Boolean);
+    if (tokens.length > 1) {
+        const translated = tokens.map((token) => dictionary[token] || '');
+        if (translated.every(Boolean)) {
+            return translated.join(' / ');
+        }
+    }
+
+    return fallback || normalized;
+}
+
+function formatManagedRunStatus(status) {
+    return formatMappedLabel(status, STATE_LABELS, '未知');
+}
+
+function formatAgentTypeLabel(agentType) {
+    return formatMappedLabel(agentType, ROLE_LABELS, '成员');
+}
+
 // Update count badges
 function updateBadges(data) {
     document.getElementById('teams-count').textContent = (data.teams || []).length;
@@ -683,11 +1616,12 @@ function updateProcesses(processes) {
 // Render a single process
 function renderProcess(process) {
     const uptime = formatUptime(process.started_at);
-    const provider = detectProcessProvider(process).toUpperCase();
+    const detectedProvider = detectProcessProvider(process);
+    const provider = detectedProvider === 'unknown' ? '未知' : providerDisplayName(detectedProvider);
     return `
         <div class="process-item">
             <div class="process-info">
-                <span class="process-pid">PID ${process.pid}</span>
+                <span class="process-pid">进程 ${process.pid}</span>
                 <span class="process-uptime">${provider}</span>
                 <span class="process-uptime">${uptime}</span>
             </div>
@@ -700,49 +1634,877 @@ function renderProcess(process) {
 function updateTeams(teams) {
     const container = document.getElementById('teams-container');
     const nav = document.getElementById('team-nav');
+    const lookup = buildTeamDetailLookup(teams);
 
-    if (teams.length === 0) {
-        container.innerHTML = '<p class="empty-state"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>当前筛选下未找到活动团队</p>';
+    if (nav) {
         nav.innerHTML = '';
         nav.style.display = 'none';
+    }
+
+    if (shouldDeferControlPanelRender()) {
+        deferredTeamsRender = teams;
+        syncAgentDetailModal(lookup);
         return;
     }
 
-    const html = `
-        <div class="teams-grid">
-            ${teams.map(team => renderTeam(team)).join('')}
+    const focusSnapshot = captureControlComposerState();
+    ensureControlSelection(teams);
+
+    if (teams.length === 0) {
+        selectedTeamName = null;
+        selectedAgentKey = null;
+        container.innerHTML = '<p class="empty-state"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>当前筛选下未找到活动团队</p>';
+        syncAgentDetailModal(lookup);
+        return;
+    }
+
+    const context = resolveControlSelection(teams);
+    container.innerHTML = renderControlWorkspace(teams, context);
+    syncAgentDetailModal(lookup);
+    restoreControlComposerState(focusSnapshot);
+}
+
+function buildTeamControlKey(team) {
+    return `${team?.name || 'unknown'}::team-overview`;
+}
+
+function ensureControlSelection(teams) {
+    if (!Array.isArray(teams) || teams.length === 0) {
+        selectedTeamName = null;
+        selectedAgentKey = null;
+        return;
+    }
+
+    let team = teams.find(item => item.name === selectedTeamName);
+    if (!team) {
+        team = teams[0];
+        selectedTeamName = team.name;
+        selectedAgentKey = null;
+    }
+
+    const members = Array.isArray(team.members) ? team.members : [];
+    if (selectedAgentKey === TEAM_OVERVIEW_KEY) {
+        return;
+    }
+
+    if (!selectedAgentKey) {
+        selectedAgentKey = members.length > 0 ? buildAgentDetailKey(team, members[0]) : TEAM_OVERVIEW_KEY;
+        return;
+    }
+
+    const hasSelectedAgent = members.some(agent => buildAgentDetailKey(team, agent) === selectedAgentKey);
+    if (!hasSelectedAgent) {
+        selectedAgentKey = members.length > 0 ? buildAgentDetailKey(team, members[0]) : TEAM_OVERVIEW_KEY;
+    }
+}
+
+function resolveControlSelection(teams) {
+    const team = (teams || []).find(item => item.name === selectedTeamName) || null;
+    if (!team) {
+        return null;
+    }
+
+    const members = Array.isArray(team.members) ? team.members : [];
+    const teamTasks = Array.isArray(team.tasks) ? team.tasks : [];
+    const { tasksByOwner, unassignedTasks } = groupTasksByOwner(members, teamTasks);
+    const agent = selectedAgentKey && selectedAgentKey !== TEAM_OVERVIEW_KEY
+        ? members.find(item => buildAgentDetailKey(team, item) === selectedAgentKey) || null
+        : null;
+
+    return {
+        team,
+        agent,
+        members,
+        provider: detectTeamProvider(team),
+        teamTasks,
+        tasksByOwner,
+        unassignedTasks,
+        tasks: agent ? (tasksByOwner[agent.name] || []) : teamTasks,
+        selectionKey: agent ? buildAgentDetailKey(team, agent) : buildTeamControlKey(team),
+        teamKey: buildTeamControlKey(team)
+    };
+}
+
+function renderControlWorkspace(teams, context) {
+    return `
+        <div class="control-workspace">
+            ${renderControlSidebar(teams, context)}
+            <section class="control-main">
+                ${context ? renderControlMain(context) : '<p class="empty-state">请选择一个团队</p>'}
+            </section>
         </div>
     `;
-    container.innerHTML = html;
+}
 
-    // Render team nav (only show when more than 1 team)
-    if (teams.length > 1) {
-        nav.style.display = '';
-        nav.innerHTML = teams.map(team => {
-            const teamId = `team-${encodeURIComponent(team.name)}`;
-            const provider = detectTeamProvider(team);
-            const providerBadge = provider === 'unknown' ? '' : ` [${escapeHtml(String(provider))}]`;
-            return `<a class="team-nav-item" data-team-id="${teamId}" title="${escapeHtml(team.name)}">${escapeHtml(team.name)}${providerBadge}</a>`;
-        }).join('');
+function renderControlSidebar(teams, context) {
+    const totalAgents = (teams || []).reduce((sum, team) => sum + ((team?.members || []).length), 0);
+    const activeTeams = (teams || []).filter(team => (team?.members || []).some(agent => isAgentInMotion(agent))).length;
 
-        // Bind click handlers
-        nav.querySelectorAll('.team-nav-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const targetId = item.getAttribute('data-team-id');
-                const target = document.getElementById(targetId);
-                if (target) {
-                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
+    return `
+        <aside class="control-sidebar">
+            <div class="control-sidebar-header">
+                <h2>团队总览</h2>
+                <p>${teams.length} 支团队 · ${totalAgents} 个可见成员 · ${activeTeams} 支团队仍在流动</p>
+            </div>
+            <div class="control-sidebar-scroll">
+                ${teams.map(team => renderControlSidebarTeam(team, context)).join('')}
+            </div>
+        </aside>
+    `;
+}
+
+function renderControlSidebarTeam(team, context) {
+    const members = Array.isArray(team.members) ? team.members : [];
+    const tasks = Array.isArray(team.tasks) ? team.tasks : [];
+    const provider = detectTeamProvider(team);
+    const providerLabel = providerDisplayName(provider);
+    const activeCount = members.filter(agent => isAgentInMotion(agent)).length;
+    const pendingTaskCount = tasks.filter(task => String(task?.status || '').toLowerCase() !== 'completed').length;
+    const runningCount = team.managed ? countManagedRunningMembers(members) : members.filter(agent => String(agent?.status || '').toLowerCase() === 'working').length;
+    const { tasksByOwner } = groupTasksByOwner(members, tasks);
+    const expanded = context?.team?.name === team.name;
+    const teamSelected = expanded && !context?.agent;
+
+    return `
+        <section class="control-team-rail ${expanded ? 'active' : ''}">
+            <button
+                type="button"
+                class="control-team-card ${teamSelected ? 'selected' : ''}"
+                data-control-select="true"
+                data-control-scope="team"
+                data-control-team-name="${escapeHtml(team.name)}"
+            >
+                <div class="control-team-card-top">
+                    <span class="control-provider-pill">${escapeHtml(providerLabel)}</span>
+                    ${team.managed ? '<span class="control-provider-pill managed">受管</span>' : '<span class="control-provider-pill imported">导入</span>'}
+                </div>
+                <div class="control-team-card-name">${escapeHtml(team.name)}</div>
+                <div class="control-team-card-meta">${members.length} 个成员 · ${pendingTaskCount} 项待处理</div>
+                <div class="control-team-card-stats">
+                    <span>${runningCount} 运行中</span>
+                    <span>${activeCount} 活跃</span>
+                </div>
+            </button>
+            ${expanded ? `
+                <div class="control-agent-list">
+                    <button
+                        type="button"
+                        class="control-agent-nav control-agent-overview ${teamSelected ? 'selected' : ''}"
+                        data-control-select="true"
+                        data-control-scope="team"
+                        data-control-team-name="${escapeHtml(team.name)}"
+                    >
+                        <span class="control-agent-marker">全</span>
+                        <span class="control-agent-copy">
+                            <span class="control-agent-name">全部活动</span>
+                            <span class="control-agent-meta">团队广播、任务板和全部成员动态</span>
+                        </span>
+                    </button>
+                    ${members.map(agent => renderControlSidebarAgent(team, agent, tasksByOwner[agent.name] || [])).join('')}
+                    ${members.length === 0 ? '<div class="control-agent-empty">当前筛选下没有可见成员</div>' : ''}
+                </div>
+            ` : ''}
+        </section>
+    `;
+}
+
+function renderControlSidebarAgent(team, agent, tasks) {
+    const key = buildAgentDetailKey(team, agent);
+    const selected = team.name === selectedTeamName && selectedAgentKey === key;
+    const primarySignal = buildAgentPrimarySignal(agent, tasks);
+    const meta = primarySignal
+        ? truncateMultiline(primarySignal.value, 50)
+        : buildAgentMetaSummary(agent, tasks, isAgentInMotion(agent));
+
+    return `
+        <button
+            type="button"
+            class="control-agent-nav ${selected ? 'selected' : ''}"
+            data-control-select="true"
+            data-control-scope="agent"
+            data-control-team-name="${escapeHtml(team.name)}"
+            data-control-agent-key="${escapeHtml(key)}"
+        >
+            <span class="control-agent-marker ${escapeHtml(String(agent?.status || 'idle').toLowerCase())}">${escapeHtml(getRoleIcon(agent))}</span>
+            <span class="control-agent-copy">
+                <span class="control-agent-name">${escapeHtml(agent.name || '未命名成员')}</span>
+                <span class="control-agent-meta">${escapeHtml(meta)}</span>
+            </span>
+        </button>
+    `;
+}
+
+function renderControlMain(context) {
+    const feedItems = buildConversationFeed(context);
+    return `
+        <div class="control-main-shell">
+            ${renderControlHero(context)}
+            <section class="control-feed-panel">
+                <div class="control-section-bar">
+                    <h3>当前活动流</h3>
+                    <div class="control-section-meta">${feedItems.length} 条活动</div>
+                </div>
+                <div class="control-feed-scroll">
+                    ${renderConversationFeed(feedItems)}
+                </div>
+            </section>
+            ${renderControlComposer(context)}
+        </div>
+    `;
+}
+
+function renderControlHero(context) {
+    const { team, agent, provider, tasks, members, teamTasks } = context;
+    const providerLabel = providerDisplayName(provider);
+    const statusClass = agent ? String(agent?.status || 'idle').toLowerCase() : '';
+    const canDelete = !team.managed && provider !== 'codex' && isAdminAuthenticated();
+    const actionMarkup = agent && isManagedAgent(team, agent)
+        ? renderManagedAgentActionButtons(team, agent, isAdminAuthenticated())
+        : renderTeamActions(team, provider, canDelete);
+
+    return `
+        <section class="control-hero" ${actionMarkup ? 'data-managed-feedback-scope="true"' : ''}>
+            <div class="control-hero-top">
+                <div class="control-hero-copy">
+                    <div class="control-hero-title-row">
+                        <div>
+                            <h2>${escapeHtml(agent ? agent.name : team.name)}</h2>
+                            <p>${escapeHtml(agent ? `${team.name} · ${formatAgentTypeLabel(agent.agent_type)}` : `${providerLabel} · ${team.managed ? '受管团队' : '导入团队'}`)}</p>
+                        </div>
+                        <div class="control-hero-badges">
+                            <span class="control-provider-pill ${team.managed ? 'managed' : 'imported'}">${team.managed ? '受管' : providerLabel}</span>
+                            ${agent ? `<span class="agent-status ${escapeHtml(statusClass)}">${escapeHtml(formatAgentStatus(agent.status))}</span>` : `<span class="control-provider-pill subtle">${escapeHtml(`${members.length} 个成员`)}</span>`}
+                        </div>
+                    </div>
+                    <div class="control-hero-path">
+                        ${agent?.cwd ? escapeHtml(agent.cwd) : team.project_cwd ? escapeHtml(team.project_cwd) : '未提供工作目录'}
+                    </div>
+                </div>
+                ${actionMarkup ? `
+                    <div class="control-hero-actions">
+                        ${actionMarkup}
+                        <span class="agent-command-feedback control-action-feedback" data-managed-feedback></span>
+                    </div>
+                ` : ''}
+            </div>
+            <div class="control-stat-grid">
+                ${renderControlStatCards(context)}
+            </div>
+            <div class="control-detail-grid">
+                ${agent ? renderControlAgentDetail(team, agent, tasks) : renderControlTeamDetail(team, teamTasks, members)}
+            </div>
+        </section>
+    `;
+}
+
+function renderControlStatCards(context) {
+    const { team, agent, provider, tasks, members, teamTasks } = context;
+    if (agent) {
+        const lastActive = formatRelativeTime(agent.last_active_time || agent.last_message_time || agent.last_activity) || '暂无活动';
+        const transport = isManagedAgent(team, agent)
+            ? '受管终端'
+            : agent.command_transport === 'claude_inbox'
+                ? 'Claude 收件箱'
+                : (agent.command_reason ? '只读' : '未知');
+        const todos = Array.isArray(agent.todos) ? agent.todos.length : 0;
+        const statusMeta = isManagedAgent(team, agent)
+            ? describeManagedAgentControlState(agent)
+            : (agent.command_reason || buildAgentMetaSummary(agent, tasks, isAgentInMotion(agent)));
+        const transportMeta = describeAgentTransportState(team, agent);
+        return [
+            renderControlStatCard('状态', formatAgentStatus(agent.status), statusMeta),
+            renderControlStatCard('通道', transport, transportMeta),
+            renderControlStatCard('最近活动', lastActive, agent.current_task ? truncateMultiline(agent.current_task, 40) : '暂无当前任务'),
+            renderControlStatCard('任务 / 待办', `${tasks.length} / ${todos}`, tasks[0] ? truncateMultiline(tasks[0].subject || '', 40) : '暂无挂起任务')
+        ].join('');
+    }
+
+    const pendingTasks = teamTasks.filter(task => String(task?.status || '').toLowerCase() !== 'completed');
+    const activeMembers = members.filter(member => isAgentInMotion(member)).length;
+    return [
+        renderControlStatCard('来源', providerDisplayName(provider), team.managed ? '由系统直接托管' : '由外部数据导入'),
+        renderControlStatCard('成员', String(members.length), `${activeMembers} 个仍在活动`),
+        renderControlStatCard('待处理任务', String(pendingTasks.length), pendingTasks[0] ? truncateMultiline(pendingTasks[0].subject || '', 40) : '当前任务板为空'),
+        renderControlStatCard('操控模式', team.managed ? '团队可控' : '按成员控制', team.managed ? '未选成员时将发给团队主成员' : '请选择具体成员后发送')
+    ].join('');
+}
+
+function renderControlStatCard(label, value, meta) {
+    return `
+        <div class="control-stat-card">
+            <div class="control-stat-main">
+                <div class="control-stat-label">${escapeHtml(label)}</div>
+                <div class="control-stat-value">${escapeHtml(value)}</div>
+            </div>
+            <div class="control-stat-meta">${escapeHtml(meta)}</div>
+        </div>
+    `;
+}
+
+function renderControlAgentDetail(team, agent, tasks) {
+    const output = agentPrimaryOutput(agent);
+    const signals = renderAgentSignals(agent, { truncate: true });
+
+    return `
+        <div class="control-output-card">
+            <h3>${escapeHtml(agent.name)} 的最新输出</h3>
+            ${output
+                ? `<pre class="control-output-text">${escapeHtml(output)}</pre>`
+                : '<div class="control-empty-inline">暂无最新完整输出，等待下一次响应。</div>'}
+            ${agent.cwd ? `<div class="control-path-footnote">${escapeHtml(agent.cwd)}</div>` : ''}
+        </div>
+        <div class="control-detail-stack">
+            <div class="control-mini-panel">
+                ${signals || '<div class="control-empty-inline">当前没有新的任务、工具或思路信号。</div>'}
+            </div>
+            <div class="control-mini-panel">
+                ${tasks.length > 0 ? renderAgentTaskList(tasks) : '<div class="control-empty-inline">当前没有分配到该成员的任务。</div>'}
+            </div>
+            <div class="control-mini-panel">
+                ${Array.isArray(agent.todos) && agent.todos.length > 0 ? renderAgentTodos(agent.todos, { showTitle: false }) : '<div class="control-empty-inline">当前没有同步到待办清单。</div>'}
+            </div>
+        </div>
+    `;
+}
+
+function renderControlTeamDetail(team, teamTasks, members) {
+    const pendingTasks = teamTasks.filter(task => String(task?.status || '').toLowerCase() !== 'completed');
+    const overview = buildControlTeamOverview(team, members, pendingTasks);
+
+    return `
+        <div class="control-output-card">
+            <h3>${escapeHtml(team.name)} 的当前态势</h3>
+            <div class="control-overview-text">${escapeHtml(overview)}</div>
+            ${team.project_cwd ? `<div class="control-path-footnote">${escapeHtml(team.project_cwd)}</div>` : ''}
+        </div>
+        <div class="control-detail-stack">
+            <div class="control-mini-panel">
+                ${members.length > 0 ? `
+                    <div class="control-member-pills">
+                        ${members.map(member => `
+                            <span class="control-member-pill ${escapeHtml(String(member?.status || 'idle').toLowerCase())}">
+                                ${escapeHtml(member.name || '成员')}
+                            </span>
+                        `).join('')}
+                    </div>
+                ` : '<div class="control-empty-inline">当前筛选下没有可见成员。</div>'}
+            </div>
+            <div class="control-mini-panel">
+                ${pendingTasks.length > 0 ? renderAgentTaskList(pendingTasks.slice(0, 6)) : '<div class="control-empty-inline">任务板已经清空。</div>'}
+            </div>
+        </div>
+    `;
+}
+
+function buildControlTeamOverview(team, members, pendingTasks) {
+    const workingCount = members.filter(member => String(member?.status || '').toLowerCase() === 'working').length;
+    const activeCount = members.filter(member => isAgentInMotion(member)).length;
+    if (team.managed) {
+        return `${team.name} 当前处于 ${formatManagedRunStatus(team.managed_status || '')} 状态，可见 ${members.length} 个成员，其中 ${workingCount} 个处于工作中，${pendingTasks.length} 项任务尚未完成。`;
+    }
+
+    return `${team.name} 当前由 ${members.length} 个成员构成，其中 ${activeCount} 个最近仍有活动信号，任务板上还有 ${pendingTasks.length} 项待处理。`;
+}
+
+function isTerminalActivityText(text = '') {
+    return /\b(bash|terminal|shell|powershell|pwsh|cmd|zsh|sh)\b/i.test(String(text || ''));
+}
+
+function decorateConversationItem(item) {
+    const next = { ...item };
+    const title = String(item?.title || '');
+    const text = String(item?.text || '');
+    const signal = `${title} ${text}`;
+
+    if (item?.kind === 'terminal' || item?.kind === 'terminal_output') {
+        return next;
+    }
+
+    if (item?.kind === 'tool' && isTerminalActivityText(signal)) {
+        next.kind = 'terminal';
+        next.title = title && title !== '工具调用' ? title : '终端命令';
+        return next;
+    }
+
+    if (item?.kind === 'tool_result' && isTerminalActivityText(signal)) {
+        next.kind = 'terminal_output';
+        next.title = '终端输出';
+        return next;
+    }
+
+    if (title.includes('工具结果') && isTerminalActivityText(signal)) {
+        next.kind = 'terminal_output';
+        next.title = '终端输出';
+        return next;
+    }
+
+    return next;
+}
+
+function describeAgentTransportState(team, agent) {
+    if (!agent) {
+        return '';
+    }
+
+    if (isManagedAgent(team, agent)) {
+        return describeManagedAgentControlState(agent);
+    }
+
+    if (agent.command_transport === 'claude_inbox') {
+        return '可通过 Claude 收件箱定向发送';
+    }
+
+    const reason = normalizeMultilineText(agent.command_reason || '');
+    if (reason) {
+        return reason;
+    }
+
+    return '当前监控仅展示活动流，暂不支持向该类型注入指令';
+}
+
+function buildConversationFeed(context) {
+    if (!context?.team) {
+        return [];
+    }
+
+    const items = [];
+    const { team, agent, members, tasks, teamTasks, tasksByOwner, unassignedTasks, teamKey } = context;
+
+    if (agent) {
+        buildAgentTimeline(agent, tasks).forEach((event, index) => {
+            items.push({
+                id: `${buildAgentDetailKey(team, agent)}::event::${index}`,
+                role: 'agent',
+                actor: agent.name,
+                kind: event.kind || 'message',
+                title: event.title || '消息',
+                text: event.text || '',
+                timestamp: toTimestamp(event.time) || getAgentActivityTimestamp(agent) || 0,
+                relative: event.relative || formatRelativeTime(event.time)
             });
         });
 
-        updateTeamNavActive();
+        const output = agentPrimaryOutput(agent);
+        if (output && output !== normalizeMultilineText(agent.latest_message || '')) {
+            items.push({
+                id: `${buildAgentDetailKey(team, agent)}::output`,
+                role: 'agent',
+                actor: agent.name,
+                kind: 'response',
+                title: '完整输出',
+                text: output,
+                timestamp: getAgentActivityTimestamp(agent) || 0,
+                relative: formatRelativeTime(agent.last_active_time || agent.last_message_time || agent.last_activity)
+            });
+        }
+
+        (tasks || [])
+            .filter(task => String(task?.status || '').toLowerCase() !== 'completed')
+            .slice(0, 3)
+            .forEach((task) => {
+                items.push({
+                    id: `${buildAgentDetailKey(team, agent)}::task::${task.id}`,
+                    role: 'system',
+                    actor: '任务板',
+                    kind: 'task',
+                    title: `任务 ${task.id}`,
+                    text: task.subject || '',
+                    timestamp: toTimestamp(task.updated_at || task.created_at),
+                    relative: formatRelativeTime(task.updated_at || task.created_at)
+                });
+            });
+
+        (Array.isArray(agent.todos) ? agent.todos : [])
+            .slice(0, 3)
+            .forEach((todo, index) => {
+                items.push({
+                    id: `${buildAgentDetailKey(team, agent)}::todo::${index}`,
+                    role: 'system',
+                    actor: '待办',
+                    kind: 'task',
+                    title: `待办 ${formatTodoStatus(todo.status)}`,
+                    text: todo.active_form || todo.content || '',
+                    timestamp: getAgentActivityTimestamp(agent) || 0,
+                    relative: formatRelativeTime(agent.last_active_time || agent.last_message_time || agent.last_activity)
+                });
+            });
+
+        addPendingOperatorMessages(items, teamKey, buildAgentDetailKey(team, agent));
     } else {
-        nav.style.display = 'none';
-        nav.innerHTML = '';
+        members.forEach((member) => {
+            buildAgentTimeline(member, tasksByOwner[member.name] || []).forEach((event, index) => {
+                items.push({
+                    id: `${buildAgentDetailKey(team, member)}::team-feed::${index}`,
+                    role: 'agent',
+                    actor: member.name,
+                    kind: event.kind || 'message',
+                    title: event.title || '消息',
+                    text: event.text || '',
+                    timestamp: toTimestamp(event.time) || getAgentActivityTimestamp(member) || 0,
+                    relative: event.relative || formatRelativeTime(event.time)
+                });
+            });
+        });
+
+        unassignedTasks.forEach((task) => {
+            items.push({
+                id: `${teamKey}::unassigned::${task.id}`,
+                role: 'system',
+                actor: '前台广播',
+                kind: 'task',
+                title: `待认领任务 ${task.id}`,
+                text: task.subject || '',
+                timestamp: toTimestamp(task.updated_at || task.created_at),
+                relative: formatRelativeTime(task.updated_at || task.created_at)
+            });
+        });
+
+        if (items.length === 0 && teamTasks.length > 0) {
+            teamTasks.slice(0, 4).forEach((task) => {
+                items.push({
+                    id: `${teamKey}::task-board::${task.id}`,
+                    role: 'system',
+                    actor: '任务板',
+                    kind: 'task',
+                    title: `任务 ${task.id}`,
+                    text: task.subject || '',
+                    timestamp: toTimestamp(task.updated_at || task.created_at),
+                    relative: formatRelativeTime(task.updated_at || task.created_at)
+                });
+            });
+        }
+
+        addPendingOperatorMessages(items, teamKey, '');
     }
 
-    syncAgentDetailModal(buildTeamDetailLookup(teams));
+    items.sort((a, b) => {
+        if (a.timestamp === b.timestamp) {
+            return String(a.id).localeCompare(String(b.id));
+        }
+        return a.timestamp - b.timestamp;
+    });
+
+    return items.slice(-CONTROL_FEED_LIMIT).map(decorateConversationItem);
+}
+
+function addPendingOperatorMessages(items, teamKey, agentKey) {
+    pendingOperatorMessages.forEach((message) => {
+        if (message.teamKey !== teamKey) {
+            return;
+        }
+
+        if (agentKey && message.agentKey !== agentKey) {
+            return;
+        }
+
+        items.push({
+            id: message.id,
+            role: 'operator',
+            actor: '我',
+            kind: 'message',
+            title: message.title,
+            text: message.text,
+            timestamp: toTimestamp(message.timestamp),
+            relative: formatRelativeTime(message.timestamp)
+        });
+    });
+}
+
+function controlFeedAvatarLabel(item) {
+    if (item?.role === 'operator') {
+        return '我';
+    }
+    if (item?.role === 'system') {
+        return '系统';
+    }
+
+    const actor = String(item?.actor || '').trim();
+    return actor ? actor.slice(0, 2) : '?';
+}
+
+function renderConversationFeed(items) {
+    if (!items.length) {
+        return '<div class="control-feed-empty">当前没有新的活动信号，等待下一次对话或工具回声。</div>';
+    }
+
+    return `
+        <div class="control-feed">
+            ${items.map(item => `
+                <article class="control-feed-item ${escapeHtml(item.role)} ${escapeHtml(item.kind || 'message')}">
+                    <div class="control-feed-avatar">${escapeHtml(controlFeedAvatarLabel(item))}</div>
+                    <div class="control-feed-bubble">
+                        <div class="control-feed-head">
+                            <span class="control-feed-actor">${escapeHtml(item.actor || '系统')}</span>
+                            <span class="control-feed-title">${escapeHtml(item.title || '活动')}</span>
+                            ${item.relative ? `<span class="control-feed-time">${escapeHtml(item.relative)}</span>` : ''}
+                        </div>
+                        <pre class="control-feed-text">${escapeHtml(item.text || '')}</pre>
+                    </div>
+                </article>
+            `).join('')}
+        </div>
+    `;
+}
+
+function buildControlComposerConfig(context) {
+    const { team, agent, selectionKey } = context;
+    const feedback = controlComposerFeedback[selectionKey] || '';
+    const submitting = controlComposerSubmitting[selectionKey] === true;
+
+    if (!adminAuthState.configured) {
+        return {
+            selectionKey,
+            targetLabel: agent ? agent.name : team.name,
+            channelLabel: '只读',
+            hint: '未配置管理员账号密码，当前仅允许浏览。',
+            placeholder: '当前不可发送',
+            buttonLabel: '发送',
+            enabled: false,
+            feedback,
+            submitting
+        };
+    }
+
+    if (!isAdminAuthenticated()) {
+        return {
+            selectionKey,
+            targetLabel: agent ? agent.name : team.name,
+            channelLabel: '只读',
+            hint: '管理员登录后才能发送指令。',
+            placeholder: '当前不可发送',
+            buttonLabel: '发送',
+            enabled: false,
+            feedback,
+            submitting
+        };
+    }
+
+    if (agent && isManagedAgent(team, agent)) {
+        const controllable = isManagedAgentControllable(agent);
+        return {
+            selectionKey,
+            targetLabel: agent.name,
+            channelLabel: '受管终端',
+            hint: controllable ? '当前直连到受管会话，消息会原样写入该成员。' : describeManagedAgentControlState(agent),
+            placeholder: controllable ? `输入发给 ${agent.name} 的命令、修复任务或追问` : '当前会话不可写入',
+            buttonLabel: '发送给成员',
+            enabled: controllable,
+            transport: agent.command_transport || '',
+            managedTeamID: team.managed_team_id || '',
+            managedAgentID: agent.agent_id || '',
+            teamName: team.name,
+            agentName: agent.name,
+            feedback,
+            submitting
+        };
+    }
+
+    if (!agent && team.managed) {
+        const lead = Array.isArray(team.members) && team.members.length > 0 ? team.members[0] : null;
+        const enabled = Boolean(lead && isManagedAgentControllable(lead) && team.managed_team_id);
+        return {
+            selectionKey,
+            targetLabel: `${team.name} 主成员`,
+            channelLabel: '受管团队',
+            hint: enabled ? '当前处于团队总览，消息将默认写给该受管团队的主成员。' : '团队主成员当前不可控；可以先在左侧选择具体成员。',
+            placeholder: enabled ? `输入发给 ${team.name} 主成员的团队级指令` : '当前团队总览不可写入',
+            buttonLabel: '发送给主成员',
+            enabled,
+            transport: 'managed_pty',
+            managedTeamID: team.managed_team_id || '',
+            managedAgentID: '',
+            teamName: team.name,
+            agentName: '',
+            feedback,
+            submitting
+        };
+    }
+
+    if (agent && agent.command_transport === 'claude_inbox') {
+        return {
+            selectionKey,
+            targetLabel: agent.name,
+            channelLabel: 'Claude 收件箱',
+            hint: '消息会以队友消息的形式投递给当前成员。',
+            placeholder: `输入发给 ${agent.name} 的命令、消息或追问`,
+            buttonLabel: '发送给成员',
+            enabled: true,
+            transport: agent.command_transport,
+            managedTeamID: '',
+            managedAgentID: '',
+            teamName: team.name,
+            agentName: agent.name,
+            feedback,
+            submitting
+        };
+    }
+
+    return {
+        selectionKey,
+        targetLabel: agent ? agent.name : team.name,
+        channelLabel: '只读',
+        hint: agent
+            ? (agent.command_reason || '当前通道暂不支持直接下发指令。')
+            : '当前是团队总览。为避免误投，导入团队视图下需要先选择一个具体成员。',
+        placeholder: agent ? '当前通道暂不支持发送' : '请选择左侧具体成员',
+        buttonLabel: '发送',
+        enabled: false,
+        transport: agent?.command_transport || '',
+        managedTeamID: '',
+        managedAgentID: '',
+        teamName: team.name,
+        agentName: agent?.name || '',
+        feedback,
+        submitting
+    };
+}
+
+function renderControlComposer(context) {
+    const config = buildControlComposerConfig(context);
+    const draft = controlComposerDrafts[config.selectionKey] || '';
+
+    return `
+        <form
+            class="control-composer"
+            data-control-composer-form="true"
+            data-control-selection-key="${escapeHtml(config.selectionKey)}"
+            data-command-transport="${escapeHtml(config.transport || '')}"
+            data-managed-team-id="${escapeHtml(config.managedTeamID || '')}"
+            data-managed-agent-id="${escapeHtml(config.managedAgentID || '')}"
+            data-team-name="${escapeHtml(config.teamName || '')}"
+            data-agent-name="${escapeHtml(config.agentName || '')}"
+        >
+            <div class="control-composer-top">
+                <h3>对 ${escapeHtml(config.targetLabel)} 发送指令</h3>
+                <div class="control-composer-meta">
+                    <span class="control-provider-pill subtle">${escapeHtml(config.channelLabel)}</span>
+                    <span class="control-composer-shortcut">回车发送 · Shift+回车换行</span>
+                </div>
+            </div>
+            <textarea
+                class="agent-command-input control-composer-input"
+                name="control-composer-text"
+                rows="3"
+                data-control-composer-input="true"
+                data-control-selection-key="${escapeHtml(config.selectionKey)}"
+                placeholder="${escapeHtml(config.placeholder)}"
+                ${!config.enabled ? 'disabled' : ''}
+            >${escapeHtml(draft)}</textarea>
+            <div class="control-composer-bottom">
+                <div class="control-composer-hint">${escapeHtml(config.hint)}</div>
+                <div class="control-composer-actions">
+                    <span class="agent-command-feedback control-composer-feedback">${escapeHtml(config.feedback)}</span>
+                    <button type="submit" class="agent-command-submit" ${!config.enabled || config.submitting ? 'disabled' : ''}>${escapeHtml(config.submitting ? '发送中...' : config.buttonLabel)}</button>
+                </div>
+            </div>
+        </form>
+    `;
+}
+
+async function submitControlComposer(form) {
+    const textarea = form.querySelector('[data-control-composer-input]');
+    const submitButton = form.querySelector('button[type="submit"]');
+    const selectionKey = form.getAttribute('data-control-selection-key') || '';
+    const text = textarea instanceof HTMLTextAreaElement ? textarea.value.trim() : '';
+
+    if (!selectionKey) {
+        return;
+    }
+
+    if (!isAdminAuthenticated()) {
+        controlComposerFeedback[selectionKey] = '管理员登录后才能发送指令';
+        rerenderControlWorkspace();
+        return;
+    }
+
+    if (!text) {
+        controlComposerFeedback[selectionKey] = '请输入消息';
+        rerenderControlWorkspace();
+        return;
+    }
+
+    if (submitButton instanceof HTMLButtonElement) {
+        submitButton.disabled = true;
+    }
+    controlComposerSubmitting[selectionKey] = true;
+    controlComposerFeedback[selectionKey] = '发送中...';
+    rerenderControlWorkspace();
+
+    try {
+        const result = await sendAgentMessageRequest({
+            teamName: form.getAttribute('data-team-name') || '',
+            agentName: form.getAttribute('data-agent-name') || '',
+            transport: form.getAttribute('data-command-transport') || '',
+            managedTeamID: form.getAttribute('data-managed-team-id') || '',
+            managedAgentID: form.getAttribute('data-managed-agent-id') || '',
+            text
+        });
+
+        const teams = previousState?.teams || [];
+        const team = teams.find(item => item.name === (form.getAttribute('data-team-name') || '')) || null;
+        const agent = resolveMessageTargetAgent(team, form.getAttribute('data-agent-name') || '', form.getAttribute('data-managed-agent-id') || '');
+        queueOperatorMessage(team, agent, text);
+
+        controlComposerDrafts[selectionKey] = '';
+        controlComposerFeedback[selectionKey] = result.confirmation;
+        await fetchData();
+    } catch (error) {
+        controlComposerFeedback[selectionKey] = `发送失败: ${error.message}`;
+        rerenderControlWorkspace();
+    } finally {
+        controlComposerSubmitting[selectionKey] = false;
+        if (submitButton instanceof HTMLButtonElement) {
+            submitButton.disabled = false;
+        }
+        rerenderControlWorkspace();
+    }
+}
+
+function resolveMessageTargetAgent(team, agentName, managedAgentID) {
+    if (!team) {
+        return null;
+    }
+
+    const members = Array.isArray(team.members) ? team.members : [];
+    if (managedAgentID) {
+        return members.find(agent => String(agent?.agent_id || '') === managedAgentID) || null;
+    }
+
+    if (agentName) {
+        return members.find(agent => String(agent?.name || '') === agentName) || null;
+    }
+
+    return null;
+}
+
+function queueOperatorMessage(team, agent, text) {
+    if (!team) {
+        return;
+    }
+
+    pendingOperatorMessages.push({
+        id: `operator-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        teamKey: buildTeamControlKey(team),
+        agentKey: agent ? buildAgentDetailKey(team, agent) : '',
+        title: agent ? `发送给 ${agent.name}` : `发送给 ${team.name} 主成员`,
+        text: normalizeMultilineText(text),
+        timestamp: new Date().toISOString()
+    });
+
+    if (pendingOperatorMessages.length > 80) {
+        pendingOperatorMessages.splice(0, pendingOperatorMessages.length - 80);
+    }
+}
+
+function formatTodoStatus(status) {
+    switch (String(status || '').toLowerCase()) {
+        case 'in_progress':
+            return '进行中';
+        case 'completed':
+            return '已完成';
+        default:
+            return '待处理';
+    }
 }
 
 function buildTeamDetailLookup(teams) {
@@ -814,22 +2576,33 @@ function renderTeam(team) {
     const activeCount = members.filter(member => isAgentInMotion(member)).length;
     const responseCount = members.filter(member => Boolean(agentPrimaryOutput(member))).length;
     const pendingTasks = tasks.filter(task => task.status !== 'completed').length;
+    const managedRunningCount = team.managed ? countManagedRunningMembers(members) : 0;
+    const managedControllableCount = team.managed ? countManagedControllableMembers(members) : 0;
     const teamId = `team-${encodeURIComponent(team.name)}`;
-    const canDelete = provider !== 'codex';
-    const providerBadge = provider !== 'unknown' ? `<span class="agent-type">[${escapeHtml(provider)}]</span>` : '';
-
-    return `
-        <div class="team-card" id="${teamId}">
-            <div class="team-header">
-                <div class="team-header-left">
-                    <div class="team-name">${escapeHtml(team.name)} ${providerBadge}</div>
-                    <div class="team-created">创建时间: ${createdDate}</div>
-                    ${projectCwd ? `<div class="team-cwd">工作目录: ${escapeHtml(projectCwd)}</div>` : ''}
+    const canDelete = !team.managed && provider !== 'codex' && isAdminAuthenticated();
+    const providerBadge = provider !== 'unknown' ? `<span class="agent-type">[${escapeHtml(providerDisplayName(provider))}]</span>` : '';
+    const controlBadge = team.managed
+        ? `<span class="agent-type">[受管:${escapeHtml(formatManagedRunStatus(team.managed_status || ''))}]</span>`
+        : `<span class="agent-type">[导入]</span>`;
+    const headerAction = renderTeamActions(team, provider, canDelete);
+    const summaryBar = team.managed ? `
+                <div class="team-summary-item">
+                    <span class="team-summary-label">成员</span>
+                    <span class="team-summary-value">${members.length}</span>
                 </div>
-                ${canDelete ? `<button class="team-delete-btn" onclick="deleteTeam('${escapeHtml(team.name)}')" title="清理团队"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg> 清理</button>` : ''}
-            </div>
-
-            <div class="team-summary-bar">
+                <div class="team-summary-item">
+                    <span class="team-summary-label">受管运行</span>
+                    <span class="team-summary-value">${managedRunningCount}/${members.length}</span>
+                </div>
+                <div class="team-summary-item">
+                    <span class="team-summary-label">本地可控</span>
+                    <span class="team-summary-value">${managedControllableCount}/${members.length}</span>
+                </div>
+                <div class="team-summary-item">
+                    <span class="team-summary-label">待处理任务</span>
+                    <span class="team-summary-value">${pendingTasks}</span>
+                </div>
+            ` : `
                 <div class="team-summary-item">
                     <span class="team-summary-label">成员</span>
                     <span class="team-summary-value">${members.length}</span>
@@ -846,11 +2619,30 @@ function renderTeam(team) {
                     <span class="team-summary-label">待处理任务</span>
                     <span class="team-summary-value">${pendingTasks}</span>
                 </div>
+            `;
+    const officeHint = team.managed
+        ? '团队卡片顶部负责全部启动 / 停止；成员卡片下方负责单成员启动 / 停止；点击成员卡片后，可在详情里继续单成员控制与发消息。'
+        : '常态下展示 4 列概览卡片，点击任意成员可查看最近活动、完整输出、工具调用和待办详情。';
+
+    return `
+        <div class="team-card" id="${teamId}">
+            <div class="team-header">
+                <div class="team-header-left">
+                    <div class="team-name">${escapeHtml(team.name)} ${providerBadge} ${controlBadge}</div>
+                    <div class="team-created">创建时间: ${createdDate}</div>
+                    ${projectCwd ? `<div class="team-cwd">工作目录: ${escapeHtml(projectCwd)}</div>` : ''}
+                    ${team.log_path ? `<div class="team-cwd">日志: ${escapeHtml(team.log_path)}</div>` : ''}
+                </div>
+                ${headerAction}
+            </div>
+
+            <div class="team-summary-bar">
+                ${summaryBar}
             </div>
 
             <div class="team-section office-scene">
-                <h3><span class="section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></span> 办公区实况 (${members.length} 位同事, ${workingCount} 位忙碌中)</h3>
-                <p class="office-hint">常态下展示 4 列概览卡片，点击任意 Agent 可查看最近活动、完整输出、工具调用和待办详情。</p>
+                <h3><span class="section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></span> 办公区实况（${members.length} 位同事，${workingCount} 位忙碌中）</h3>
+                <p class="office-hint">${officeHint}</p>
                 ${renderAgentsWithTasks(team, members, tasks)}
             </div>
         </div>
@@ -859,6 +2651,11 @@ function renderTeam(team) {
 
 // Delete a team
 async function deleteTeam(teamName) {
+    if (!isAdminAuthenticated()) {
+        alert('管理员登录后才能清理团队');
+        return;
+    }
+
     if (!confirm(`确定要清理团队「${teamName}」吗？\n\n这将删除该团队的配置和任务数据。`)) {
         return;
     }
@@ -1090,7 +2887,7 @@ function renderAgentCard(team, agent, tasks) {
     const latestText = buildAgentLatestStatus(agent, tasks);
     const metaText = buildAgentMetaSummary(agent, tasks, moving);
 
-    return `
+    const cardMarkup = `
         <button
             type="button"
             class="agent-item agent-compact-card office-desk ${statusClass} ${motionClass}"
@@ -1100,7 +2897,7 @@ function renderAgentCard(team, agent, tasks) {
             <div class="agent-header">
                 <span class="agent-avatar" aria-hidden="true">${roleEmoji}</span>
                 <span class="agent-name">${escapeHtml(agent.name)}</span>
-                <span class="agent-type">[${escapeHtml(agent.agent_type)}]</span>
+                <span class="agent-type">[${escapeHtml(formatAgentTypeLabel(agent.agent_type))}]</span>
                 <span class="agent-status ${statusClass}">${statusText}</span>
                 <span class="agent-activity ${moving ? 'active' : 'idle'}">${escapeHtml(motionLabel)}</span>
             </div>
@@ -1115,6 +2912,37 @@ function renderAgentCard(team, agent, tasks) {
                 <div class="agent-compact-meta">${escapeHtml(metaText)}</div>
             </div>
         </button>
+    `;
+
+    const managedControls = renderManagedAgentControls(team, agent);
+    if (!managedControls) {
+        return cardMarkup;
+    }
+
+    return `
+        <div class="agent-card-shell">
+            ${cardMarkup}
+            ${managedControls}
+        </div>
+    `;
+}
+
+function renderManagedAgentControls(team, agent) {
+    if (!isManagedAgent(team, agent)) {
+        return '';
+    }
+
+    const stateTone = managedAgentControlTone(agent);
+    const controlsEnabled = isAdminAuthenticated();
+
+    return `
+        <div class="managed-agent-controls ${escapeHtml(stateTone)}">
+            <div class="managed-agent-state">
+                <div class="managed-agent-state-label">受管会话</div>
+                <div class="managed-agent-state-value">${escapeHtml(describeManagedAgentControlState(agent))}</div>
+            </div>
+            ${renderManagedAgentActionButtons(team, agent, controlsEnabled)}
+        </div>
     `;
 }
 
@@ -1171,9 +2999,10 @@ function buildAgentPrimarySignal(agent, tasks) {
         return { kind: 'task', label: '当前任务', value: truncateMultiline(agent.current_task, 44) };
     }
     if (agent.last_tool_use) {
+        const terminal = isTerminalActivityText(`${agent.last_tool_use || ''} ${agent.last_tool_detail || ''}`);
         return {
-            kind: 'tool',
-            label: '调用工具',
+            kind: terminal ? 'terminal' : 'tool',
+            label: terminal ? '终端命令' : '调用工具',
             value: truncateMultiline(agent.last_tool_detail ? `${agent.last_tool_use} · ${agent.last_tool_detail}` : agent.last_tool_use, 44)
         };
     }
@@ -1271,9 +3100,10 @@ function buildAgentTimeline(agent, tasks) {
     const timeline = [];
 
     if (agent.last_tool_use) {
+        const terminal = isTerminalActivityText(`${agent.last_tool_use || ''} ${agent.last_tool_detail || ''}`);
         timeline.push({
-            kind: 'tool',
-            title: '工具调用',
+            kind: terminal ? 'terminal' : 'tool',
+            title: terminal ? '终端命令' : '工具调用',
             text: agent.last_tool_detail ? `${agent.last_tool_use} · ${agent.last_tool_detail}` : agent.last_tool_use,
             time: agent.last_active_time || agent.last_message_time || agent.last_activity,
             relative: formatRelativeTime(agent.last_active_time || agent.last_message_time || agent.last_activity)
@@ -1335,9 +3165,10 @@ function renderAgentSignals(agent, options = {}) {
         });
     }
     if (agent.last_tool_use) {
+        const terminal = isTerminalActivityText(`${agent.last_tool_use || ''} ${agent.last_tool_detail || ''}`);
         chips.push({
-            kind: 'tool',
-            label: '调用工具',
+            kind: terminal ? 'terminal' : 'tool',
+            label: terminal ? '终端命令' : '调用工具',
             value: truncate
                 ? truncateMultiline(agent.last_tool_detail ? `${agent.last_tool_use} · ${agent.last_tool_detail}` : agent.last_tool_use, 100)
                 : normalizeMultilineText(agent.last_tool_detail ? `${agent.last_tool_use} · ${agent.last_tool_detail}` : agent.last_tool_use)
@@ -1421,6 +3252,9 @@ function inferEventTitle(kind) {
         case 'response': return '输出';
         case 'thinking': return '思路';
         case 'tool': return '工具调用';
+        case 'tool_result': return '工具结果';
+        case 'terminal': return '终端命令';
+        case 'terminal_output': return '终端输出';
         case 'task': return '任务';
         case 'status': return '状态';
         default: return '消息';
@@ -1432,6 +3266,9 @@ function eventGlyph(kind) {
         case 'response': return '↳';
         case 'thinking': return '⋯';
         case 'tool': return '⌘';
+        case 'tool_result': return '≋';
+        case 'terminal': return '⌥';
+        case 'terminal_output': return '⧉';
         case 'task': return '•';
         case 'status': return '○';
         default: return '✦';
@@ -1483,7 +3320,8 @@ function renderAgentTaskList(tasks) {
 }
 
 // Render todo list for an agent
-function renderAgentTodos(todos) {
+function renderAgentTodos(todos, options = {}) {
+    const { showTitle = true } = options;
     const todoStatusIcon = (status) => {
         switch (status) {
             case 'in_progress': return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
@@ -1494,7 +3332,7 @@ function renderAgentTodos(todos) {
 
     return `
         <div class="agent-todos agent-panel-section panel-todo">
-            <div class="agent-panel-title">待办清单</div>
+            ${showTitle ? '<div class="agent-panel-title">待办清单</div>' : ''}
             <div class="todo-list-compact">
                 ${todos.map(todo => {
                     const icon = todoStatusIcon(todo.status);
@@ -1576,7 +3414,7 @@ function renderAgent(agent) {
         <div class="agent-item">
             <div class="agent-header">
                 <span class="agent-name">${escapeHtml(agent.name)}</span>
-                <span class="agent-type">[${escapeHtml(agent.agent_type)}]</span>
+                <span class="agent-type">[${escapeHtml(formatAgentTypeLabel(agent.agent_type))}]</span>
                 <span class="agent-status ${statusClass}">${statusText}</span>
             </div>
             ${agent.cwd ? `<div class="agent-cwd">${escapeHtml(agent.cwd)}</div>` : ''}
@@ -1596,6 +3434,76 @@ function initAgentDetailModal() {
         const closer = event.target.closest('[data-close-agent-detail]');
         if (closer) {
             closeAgentDetail();
+        }
+    });
+
+    document.addEventListener('submit', async (event) => {
+        const form = event.target.closest('[data-agent-message-form]');
+        if (!form) {
+            return;
+        }
+
+        event.preventDefault();
+        const teamName = form.getAttribute('data-team-name') || '';
+        const agentName = form.getAttribute('data-agent-name') || '';
+        const textarea = form.querySelector('textarea[name="agent-message-text"]');
+        const submitButton = form.querySelector('button[type="submit"]');
+        const feedback = form.querySelector('[data-agent-message-feedback]');
+        const text = textarea ? textarea.value.trim() : '';
+
+        if (!isAdminAuthenticated()) {
+            if (feedback) {
+                feedback.textContent = '管理员登录后才能发送消息';
+            }
+            return;
+        }
+
+        if (!text) {
+            if (feedback) {
+                feedback.textContent = '请输入消息';
+            }
+            return;
+        }
+
+        if (submitButton) {
+            submitButton.disabled = true;
+        }
+        if (feedback) {
+            feedback.textContent = '发送中...';
+        }
+
+        try {
+            const transport = form.getAttribute('data-command-transport') || '';
+            const managedTeamID = form.getAttribute('data-managed-team-id') || '';
+            const managedAgentID = form.getAttribute('data-managed-agent-id') || '';
+            const result = await sendAgentMessageRequest({
+                teamName,
+                agentName,
+                transport,
+                managedTeamID,
+                managedAgentID,
+                text
+            });
+
+            const team = (previousState?.teams || []).find(item => item.name === teamName) || null;
+            const agent = resolveMessageTargetAgent(team, agentName, managedAgentID);
+            queueOperatorMessage(team, agent, text);
+
+            if (textarea) {
+                textarea.value = '';
+            }
+            if (feedback) {
+                feedback.textContent = result.confirmation;
+            }
+            fetchData();
+        } catch (error) {
+            if (feedback) {
+                feedback.textContent = `发送失败: ${error.message}`;
+            }
+        } finally {
+            if (submitButton) {
+                submitButton.disabled = false;
+            }
         }
     });
 
@@ -1627,8 +3535,8 @@ function closeAgentDetail() {
 
     if (modal) {
         modal.hidden = true;
-        document.body.classList.remove('agent-detail-open');
     }
+    syncOverlayState();
 }
 
 function syncAgentDetailModal(lookup) {
@@ -1641,7 +3549,7 @@ function syncAgentDetailModal(lookup) {
 
     if (!activeAgentDetailKey) {
         modal.hidden = true;
-        document.body.classList.remove('agent-detail-open');
+        syncOverlayState();
         return;
     }
 
@@ -1656,7 +3564,7 @@ function syncAgentDetailModal(lookup) {
         : renderAgentDetailModalContent(resolved.team, resolved.agent, resolved.tasks, false);
 
     modal.hidden = false;
-    document.body.classList.add('agent-detail-open');
+    syncOverlayState();
 }
 
 function resolveActiveAgentDetail(activeKey, lookup) {
@@ -1695,15 +3603,132 @@ function renderAgentDetailModalContent(team, agent, tasks, isBroadcast) {
         <div class="agent-detail-header">
             <div class="agent-detail-title-wrap">
                 <div id="agent-detail-title" class="agent-detail-title">${escapeHtml(agent.name)}</div>
-                <div class="agent-detail-subtitle">${escapeHtml(team.name)} · ${escapeHtml(agent.agent_type || 'agent')}</div>
+                <div class="agent-detail-subtitle">${escapeHtml(team.name)} · ${escapeHtml(formatAgentTypeLabel(agent.agent_type))}</div>
             </div>
             <div class="agent-detail-badges">
                 <span class="agent-status ${escapeHtml(statusClass)}">${escapeHtml(statusText)}</span>
                 <span class="agent-activity ${moving ? 'active' : 'idle'}">${escapeHtml(motionLabel)}</span>
             </div>
         </div>
+        ${renderAgentCommandComposer(team, agent)}
         ${renderAgentWithTasks(agent, tasks)}
     `;
+}
+
+function renderAgentCommandComposer(team, agent) {
+    if (!agent) {
+        return '';
+    }
+
+    if (isManagedAgent(team, agent)) {
+        const controlsEnabled = isAdminAuthenticated();
+        const controllable = isManagedAgentControllable(agent);
+        const stateTone = managedAgentControlTone(agent);
+        let controlHint = '当前受管会话的启动、停止与发消息入口已统一到这里。';
+        if (!adminAuthState.configured) {
+            controlHint = '未配置管理员账号密码，当前仅允许浏览受管会话状态。';
+        } else if (!controlsEnabled) {
+            controlHint = '管理员登录后才能启动、停止或向受管会话发消息。';
+        } else if (controllable) {
+            controlHint = '当前直连受管终端，可直接下发任务。';
+        } else if (isManagedAgentRunning(agent)) {
+            controlHint = '该受管会话仍在运行，但当前控制进程不可用；暂时无法停止或发消息。';
+        } else {
+            controlHint = '先启动这个受管成员，再向它下发任务。';
+        }
+
+        return `
+            <form
+                class="agent-command-panel managed-agent-command-panel"
+                data-agent-message-form="true"
+                data-managed-feedback-scope="true"
+                data-command-transport="${escapeHtml(agent.command_transport || '')}"
+                data-managed-team-id="${escapeHtml(team.managed_team_id || '')}"
+                data-managed-agent-id="${escapeHtml(agent.agent_id || '')}"
+                data-team-name="${escapeHtml(team.name)}"
+                data-agent-name="${escapeHtml(agent.name)}"
+            >
+                <div class="agent-panel-title">受管会话控制</div>
+                <div class="agent-command-hint">${escapeHtml(describeManagedAgentControlState(agent))}</div>
+                <div class="managed-agent-controls within-panel ${escapeHtml(stateTone)}">
+                    <div class="managed-agent-state">
+                        <div class="managed-agent-state-label">当前状态</div>
+                        <div class="managed-agent-state-value">${escapeHtml(controlHint)}</div>
+                    </div>
+                    ${renderManagedAgentActionButtons(team, agent, controlsEnabled)}
+                </div>
+                <span class="agent-command-feedback" data-managed-feedback></span>
+                <div class="agent-command-divider"></div>
+                <div class="agent-panel-title">直接发消息</div>
+                <div class="agent-command-hint">${escapeHtml(controlHint)}</div>
+                <textarea
+                    class="agent-command-input"
+                    name="agent-message-text"
+                    rows="4"
+                    placeholder="输入你要发给这个受管成员的命令或任务"
+                    ${!controlsEnabled || !controllable ? 'disabled' : ''}
+                ></textarea>
+                <div class="agent-command-actions">
+                    <button type="submit" class="agent-command-submit" ${!controlsEnabled || !controllable ? 'disabled' : ''}>发送</button>
+                    <span class="agent-command-feedback" data-agent-message-feedback></span>
+                </div>
+            </form>
+        `;
+    }
+
+    if (!adminAuthState.configured) {
+        return `
+            <div class="agent-command-panel unsupported">
+                <div class="agent-panel-title">直接发消息</div>
+                <div class="agent-command-hint">未配置管理员账号密码，当前仅允许浏览。</div>
+            </div>
+        `;
+    }
+
+    if (!isAdminAuthenticated()) {
+        return `
+            <div class="agent-command-panel unsupported">
+                <div class="agent-panel-title">直接发消息</div>
+                <div class="agent-command-hint">管理员登录后才能发送消息或修改设置。</div>
+            </div>
+        `;
+    }
+
+    if (agent.command_transport === 'claude_inbox') {
+        return `
+            <form
+                class="agent-command-panel"
+                data-agent-message-form="true"
+                data-command-transport="${escapeHtml(agent.command_transport)}"
+                data-team-name="${escapeHtml(team.name)}"
+                data-agent-name="${escapeHtml(agent.name)}"
+            >
+                <div class="agent-panel-title">直接发消息</div>
+                <div class="agent-command-hint">当前通过 Claude 收件箱投递，消息会以队友消息的形式送达。</div>
+                <textarea
+                    class="agent-command-input"
+                    name="agent-message-text"
+                    rows="4"
+                    placeholder="输入你要发给这个成员的命令或消息"
+                ></textarea>
+                <div class="agent-command-actions">
+                    <button type="submit" class="agent-command-submit">发送</button>
+                    <span class="agent-command-feedback" data-agent-message-feedback></span>
+                </div>
+            </form>
+        `;
+    }
+
+    if (agent.command_reason) {
+        return `
+            <div class="agent-command-panel unsupported">
+                <div class="agent-panel-title">直接发消息</div>
+                <div class="agent-command-hint">${escapeHtml(agent.command_reason)}</div>
+            </div>
+        `;
+    }
+
+    return '';
 }
 
 // Render tasks list
@@ -1758,22 +3783,12 @@ function formatUptime(startedAt) {
 
 // Format agent status
 function formatAgentStatus(status) {
-    const statusMap = {
-        'working': '工作中',
-        'idle': '空闲',
-        'completed': '已完成'
-    };
-    return statusMap[status] || status.toUpperCase();
+    return formatMappedLabel(status, STATE_LABELS, '未知');
 }
 
 // Format task status
 function formatTaskStatus(status) {
-    const statusMap = {
-        'in_progress': '进行中',
-        'pending': '待处理',
-        'completed': '已完成'
-    };
-    return statusMap[status] || status.toUpperCase();
+    return formatMappedLabel(status, STATE_LABELS, '未知');
 }
 
 // Escape HTML to prevent XSS
